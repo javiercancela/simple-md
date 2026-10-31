@@ -4,6 +4,7 @@
   "private": true,
   "description": "Local Markdown editor and viewer",
   "license": "UNLICENSED",
+  "author": "Javier Cancela",
   "type": "module",
   "main": ".vite/build/main.cjs",
   "scripts": {
