@@ -2,8 +2,30 @@ import fs from "node:fs";
 import path from "node:path";
 import { assertPortableSegments } from "./names";
 
+function isEnoent(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+function canonicalExisting(candidate: string): string {
+  const resolved = path.resolve(candidate);
+  try {
+    return fs.realpathSync(resolved);
+  } catch (error) {
+    if (!isEnoent(error)) throw error;
+  }
+  const parent = path.dirname(resolved);
+  try {
+    return path.join(fs.realpathSync(parent), path.basename(resolved));
+  } catch (error) {
+    if (!isEnoent(error)) throw error;
+    return resolved;
+  }
+}
+
 export function isInsideRoot(root: string, candidate: string): boolean {
-  const relative = path.relative(root, path.resolve(candidate));
+  const rootReal = fs.realpathSync(path.resolve(root));
+  const candidateReal = canonicalExisting(candidate);
+  const relative = path.relative(rootReal, candidateReal);
   if (relative === "") return true;
   if (path.isAbsolute(relative)) return false;
   return relative !== ".." && !relative.startsWith(`..${path.sep}`);
@@ -42,18 +64,15 @@ export function portableRelative(input: string): string {
   return rel;
 }
 
-function isEnoent(error: unknown): boolean {
-  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
-}
-
 export function resolveContained(
   root: string,
   relInput: string,
   options: { allowMissing?: boolean } = {},
 ): string {
+  const rootReal = realRoot(root);
   const rel = normalizeRelative(relInput);
   const segments = rel.split("/");
-  let current = root;
+  let current = rootReal;
   for (let index = 0; index < segments.length; index += 1) {
     const segment = segments[index];
     if (!segment || segment === "." || segment === "..") throw new Error("Invalid path");
@@ -64,18 +83,18 @@ export function resolveContained(
       listed = fs.lstatSync(next);
     } catch (error) {
       if (isEnoent(error) && last && options.allowMissing) {
-        assertInside(root, next);
+        assertInside(rootReal, next);
         return next;
       }
       throw new Error("Path not found");
     }
     if (listed.isSymbolicLink()) {
       const target = fs.realpathSync(next);
-      assertInside(root, target);
+      assertInside(rootReal, target);
       current = target;
       continue;
     }
-    assertInside(root, next);
+    assertInside(rootReal, next);
     current = next;
   }
   return current;

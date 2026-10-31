@@ -19,6 +19,10 @@ function tempDir(): string {
   return dir;
 }
 
+function linkTo(target: string, linkPath: string, kind: "file" | "dir"): void {
+  fs.symlinkSync(target, linkPath, kind);
+}
+
 afterEach(() => {
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
@@ -34,9 +38,11 @@ describe("resolveContained", () => {
     fs.writeFileSync(path.join(root, "nested", "a.md"), "ok");
     fs.writeFileSync(path.join(evil, "secret.md"), "no");
 
-    expect(resolveContained(root, "nested/a.md")).toBe(path.join(root, "nested", "a.md"));
+    expect(resolveContained(root, "nested/a.md")).toBe(
+      fs.realpathSync(path.join(root, "nested", "a.md")),
+    );
     expect(resolveContained(root, "fresh.md", { allowMissing: true })).toBe(
-      path.join(root, "fresh.md"),
+      path.join(fs.realpathSync(root), "fresh.md"),
     );
     expect(() => resolveContained(root, "missing/fresh.md", { allowMissing: true })).toThrow(
       /not found/i,
@@ -56,9 +62,9 @@ describe("resolveContained", () => {
     fs.mkdirSync(outside);
     fs.writeFileSync(path.join(root, "sub", "a.md"), "inside");
     fs.writeFileSync(path.join(outside, "secret.md"), "secret");
-    fs.symlinkSync(path.join(root, "sub", "a.md"), path.join(root, "link.md"));
-    fs.symlinkSync(path.join(outside, "secret.md"), path.join(root, "escape.md"));
-    fs.symlinkSync(outside, path.join(root, "out"));
+    linkTo(path.join(root, "sub", "a.md"), path.join(root, "link.md"), "file");
+    linkTo(path.join(outside, "secret.md"), path.join(root, "escape.md"), "file");
+    linkTo(outside, path.join(root, "out"), "dir");
 
     expect(readMarkdown(root, "link.md").content).toBe("inside");
     expect(() => readMarkdown(root, "escape.md")).toThrow();
@@ -86,7 +92,7 @@ describe("scanRoot", () => {
     fs.writeFileSync(path.join(root, ".git", "README.md"), "hidden");
     fs.writeFileSync(path.join(root, "node_modules", "pkg", "README.md"), "hidden");
     fs.writeFileSync(path.join(outside, "secret.md"), "secret");
-    fs.symlinkSync(outside, path.join(root, "linked-out"));
+    linkTo(outside, path.join(root, "linked-out"), "dir");
 
     const { tree, files } = scanRoot(root);
     const paths = files.map((file) => file.path).sort();
@@ -95,6 +101,45 @@ describe("scanRoot", () => {
     expect(JSON.stringify(tree)).not.toContain("secret");
     expect(JSON.stringify(tree)).not.toContain("ignore.txt");
     expect(JSON.stringify(tree)).not.toContain("node_modules");
+  });
+});
+
+describe("symlinked roots", () => {
+  it("opens a root reached through a symlink and still rejects a link that escapes", () => {
+    const parent = tempDir();
+    const realParent = path.join(parent, "private");
+    const aliasParent = path.join(parent, "var");
+    const outside = path.join(parent, "outside");
+    fs.mkdirSync(path.join(realParent, "notes", "sub"), { recursive: true });
+    fs.mkdirSync(outside);
+    const root = path.join(aliasParent, "notes");
+    linkTo(realParent, aliasParent, "dir");
+    fs.writeFileSync(path.join(root, "sub", "a.md"), "inside");
+    fs.writeFileSync(path.join(root, "Welcome.md"), "# Hi");
+    fs.writeFileSync(path.join(outside, "secret.md"), "secret");
+    linkTo(path.join(root, "sub", "a.md"), path.join(root, "link.md"), "file");
+    linkTo(path.join(outside, "secret.md"), path.join(root, "escape.md"), "file");
+    const via = path.join(parent, "via-notes");
+    linkTo(path.join(realParent, "notes"), via, "dir");
+
+    expect(fs.realpathSync(root)).not.toBe(path.resolve(root));
+    expect(readMarkdown(root, "sub/a.md").content).toBe("inside");
+    expect(readMarkdown(root, "link.md").content).toBe("inside");
+    expect(readMarkdown(via, "Welcome.md").content).toBe("# Hi");
+    expect(() => readMarkdown(root, "escape.md")).toThrow(/escapes/);
+    expect(() => readMarkdown(via, "escape.md")).toThrow(/escapes/);
+    expect(() => writeMarkdown(via, "escape.md", "pwned")).toThrow(/escapes/);
+    expect(
+      scanRoot(root)
+        .files.map((file) => file.path)
+        .sort(),
+    ).toEqual(["Welcome.md", "link.md", "sub/a.md"]);
+    expect(
+      scanRoot(via)
+        .files.map((file) => file.path)
+        .sort(),
+    ).toEqual(["Welcome.md", "link.md", "sub/a.md"]);
+    expect(fs.readFileSync(path.join(outside, "secret.md"), "utf8")).toBe("secret");
   });
 });
 
@@ -126,7 +171,7 @@ describe("links and images", () => {
     fs.writeFileSync(path.join(root, "Welcome.md"), "# Hi");
     fs.writeFileSync(path.join(root, "assets", "leaf.png"), png);
     fs.writeFileSync(path.join(outside, "secret.png"), png);
-    fs.symlinkSync(path.join(outside, "secret.png"), path.join(root, "assets", "escape.png"));
+    linkTo(path.join(outside, "secret.png"), path.join(root, "assets", "escape.png"), "file");
 
     expect(readImageDataUrl(root, "Welcome.md", "assets/leaf.png")).toMatch(
       /^data:image\/png;base64,/,

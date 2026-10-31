@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import { isMarkdownPath } from "./names";
-import { isInsideRoot, resolveContained } from "./paths";
+import { isInsideRoot, realRoot, resolveContained } from "./paths";
 import type { FileIdentity } from "./tags";
 import type { TreeNode } from "../shared/types";
 
@@ -22,7 +22,8 @@ function fileIdentity(rel: string, abs: string): FileIdentity {
   };
 }
 
-export function scanRoot(root: string): { tree: TreeNode[]; files: FileIdentity[] } {
+export function scanRoot(rootInput: string): { tree: TreeNode[]; files: FileIdentity[] } {
+  const root = realRoot(rootInput);
   const files: FileIdentity[] = [];
   const seen = new Set<string>();
 

@@ -35,7 +35,7 @@ npm ci
 npm start
 ```
 
-`npm run make` builds a `.deb` and an `.rpm`. Packaging needs `fakeroot`, `dpkg`, and `rpmbuild`.
+`npm run make` builds a `.deb` and an `.rpm`. Packaging needs `fakeroot`, `dpkg`, and `rpmbuild`. GitHub's Ubuntu image ships rpm 6, and that `rpmbuild` rejects the install script used by the rpm maker (`cp: cannot stat 'usr/*'`). CI therefore builds only the `.deb` there. A local `npm run make` is unchanged and still builds both.
 
 ### Windows
 
