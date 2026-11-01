@@ -11,7 +11,9 @@ import { hardenContents, installSessionGuards } from "./main/security";
 
 let mainWindow: BrowserWindow | null = null;
 const allowClose = new WeakSet<BrowserWindow>();
-let quitAfterClose = false;
+let rendererReady = false;
+let quitRequested = false;
+let isQuitting = false;
 
 if (started) {
   app.quit();
@@ -68,9 +70,15 @@ function openInitialFolder(): void {
 }
 
 function send(channel: string): void {
-  const win = BrowserWindow.getFocusedWindow() ?? mainWindow;
-  if (!win || win.isDestroyed()) return;
-  win.webContents.send(channel);
+  setImmediate(() => {
+    const win = BrowserWindow.getFocusedWindow() ?? mainWindow;
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send(channel);
+  });
+}
+
+function rendererCanAnswer(win: BrowserWindow): boolean {
+  return rendererReady && !win.webContents.isDestroyed() && !win.webContents.isCrashed();
 }
 
 function installMenu(): void {
@@ -78,16 +86,27 @@ function installMenu(): void {
     label: "File",
     submenu: [
       {
+        id: "open-folder",
         label: "Open Folder…",
         accelerator: "CmdOrCtrl+O",
         click: () => send(channels.menuOpenFolder),
       },
-      { label: "New File", accelerator: "CmdOrCtrl+N", click: () => send(channels.menuNewFile) },
-      { label: "New Folder", click: () => send(channels.menuNewFolder) },
+      {
+        id: "new-file",
+        label: "New File",
+        accelerator: "CmdOrCtrl+N",
+        click: () => send(channels.menuNewFile),
+      },
+      { id: "new-folder", label: "New Folder", click: () => send(channels.menuNewFolder) },
       { type: "separator" },
-      { label: "Save", accelerator: "CmdOrCtrl+S", click: () => send(channels.menuSave) },
+      {
+        id: "save",
+        label: "Save",
+        accelerator: "CmdOrCtrl+S",
+        click: () => send(channels.menuSave),
+      },
       { type: "separator" },
-      process.platform === "darwin" ? { role: "close" } : { role: "quit" },
+      process.platform === "darwin" ? { role: "close" } : { id: "quit", role: "quit" },
     ],
   };
   const template: MenuItemConstructorOptions[] = [
@@ -125,13 +144,14 @@ function createWindow(): BrowserWindow {
       webviewTag: false,
     },
   });
+  rendererReady = false;
   mainWindow = win;
   hardenContents(win);
   win.on("close", (event) => {
-    if (allowClose.has(win)) return;
-    if (win.webContents.isLoading()) return;
+    if (isQuitting || allowClose.has(win)) return;
+    if (win.webContents.isLoading() || !rendererCanAnswer(win)) return;
     event.preventDefault();
-    win.webContents.send(channels.requestClose);
+    if (!quitRequested) win.webContents.send(channels.requestClose);
   });
   win.on("closed", () => {
     if (mainWindow === win) mainWindow = null;
@@ -145,19 +165,28 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+function confirmClose(): void {
+  const win = mainWindow;
+  const shouldQuit = quitRequested;
+  quitRequested = false;
+  if (shouldQuit) isQuitting = true;
+  if (win && !win.isDestroyed()) {
+    allowClose.add(win);
+    win.close();
+  }
+  if (shouldQuit) setImmediate(() => app.quit());
+}
+
 function bootstrap(): void {
-  registerIpc(
-    () => mainWindow,
-    allowClose,
-    (value) => {
-      quitAfterClose = value;
+  registerIpc(() => mainWindow, {
+    markReady: () => {
+      rendererReady = true;
     },
-    () => {
-      const quit = quitAfterClose;
-      quitAfterClose = false;
-      return quit;
+    confirmClose,
+    cancelClose: () => {
+      quitRequested = false;
     },
-  );
+  });
 
   void app.whenReady().then(() => {
     installSessionGuards();
@@ -179,8 +208,16 @@ function bootstrap(): void {
     });
   });
 
-  app.on("before-quit", () => {
-    quitAfterClose = true;
+  app.on("before-quit", (event) => {
+    if (isQuitting) return;
+    const win = mainWindow;
+    if (!win || win.isDestroyed() || win.webContents.isLoading() || !rendererCanAnswer(win)) {
+      isQuitting = true;
+      return;
+    }
+    event.preventDefault();
+    quitRequested = true;
+    win.webContents.send(channels.requestClose);
   });
 
   app.on("window-all-closed", () => {

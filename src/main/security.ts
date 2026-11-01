@@ -5,28 +5,10 @@ import {
   type IpcMainEvent,
   type IpcMainInvokeEvent,
 } from "electron";
+import { contentSecurityPolicy } from "../shared/csp";
 
 function devServerUrl(): string {
   return typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === "string" ? MAIN_WINDOW_VITE_DEV_SERVER_URL : "";
-}
-
-export function contentSecurityPolicy(): string {
-  const connect = devServerUrl()
-    ? "connect-src 'self' ws://127.0.0.1:* ws://localhost:* http://127.0.0.1:* http://localhost:*"
-    : "connect-src 'none'";
-  return [
-    "default-src 'none'",
-    "script-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src data: blob:",
-    "font-src 'self'",
-    connect,
-    "object-src 'none'",
-    "base-uri 'none'",
-    "form-action 'none'",
-    "frame-src 'none'",
-    "frame-ancestors 'none'",
-  ].join("; ");
 }
 
 function allowedRequest(url: string): boolean {
@@ -58,7 +40,7 @@ export function installSessionGuards(): void {
   current.webRequest.onHeadersReceived((details, callback) => {
     const responseHeaders = { ...details.responseHeaders };
     if (details.resourceType === "mainFrame") {
-      responseHeaders["Content-Security-Policy"] = [contentSecurityPolicy()];
+      responseHeaders["Content-Security-Policy"] = [contentSecurityPolicy(devServerUrl())];
     }
     callback({ responseHeaders });
   });

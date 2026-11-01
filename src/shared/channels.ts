@@ -14,6 +14,7 @@ export const channels = {
   openExternal: "link:open",
   watchFile: "file:watch",
   unwatch: "file:unwatch",
+  ready: "app:ready",
   confirmClose: "app:confirm-close",
   cancelClose: "app:cancel-close",
   libraryUpdated: "library:updated",

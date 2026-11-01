@@ -491,6 +491,7 @@ export function App() {
   }, [dirty, filePath]);
 
   useEffect(() => {
+    void window.md.ready();
     const onKey = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
