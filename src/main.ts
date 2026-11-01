@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { app, BrowserWindow, Menu, type MenuItemConstructorOptions } from "electron";
+import { app, BrowserWindow, Menu, nativeTheme, type MenuItemConstructorOptions } from "electron";
 import started from "electron-squirrel-startup";
 import { realRoot } from "./core/paths";
 import { channels } from "./shared/channels";
@@ -131,8 +131,11 @@ function createWindow(): BrowserWindow {
     minWidth: 860,
     minHeight: 560,
     show: false,
-    backgroundColor: "#f3efe6",
+    backgroundColor: nativeTheme.shouldUseDarkColors ? "#161618" : "#F4F4F6",
     title: "Simple MD",
+    ...(process.platform === "darwin"
+      ? { titleBarStyle: "hiddenInset" as const, trafficLightPosition: { x: 14, y: 16 } }
+      : {}),
     ...(icon ? { icon } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -191,6 +194,10 @@ function bootstrap(): void {
   void app.whenReady().then(() => {
     installSessionGuards();
     installMenu();
+    nativeTheme.on("updated", () => {
+      const color = nativeTheme.shouldUseDarkColors ? "#161618" : "#F4F4F6";
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBackgroundColor(color);
+    });
     setLibrarySink({
       library: (session) => {
         if (mainWindow && !mainWindow.isDestroyed())

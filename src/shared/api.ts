@@ -1,4 +1,4 @@
-import type { ExternalFileEvent, FilePayload, SessionInfo, TagCount } from "./types";
+import type { AppSettings, ExternalFileEvent, FilePayload, SessionInfo, TagCount } from "./types";
 
 export type MdApi = {
   getSession: () => Promise<SessionInfo | null>;
@@ -15,6 +15,13 @@ export type MdApi = {
   setTags: (path: string, tags: string[]) => Promise<string[]>;
   listTags: () => Promise<TagCount[]>;
   filesForTag: (tag: string) => Promise<string[]>;
+  setFavorite: (path: string, favorite: boolean) => Promise<boolean>;
+  setTagColor: (tag: string, color: string) => Promise<void>;
+  snippet: (path: string) => Promise<string>;
+  revealPath: (path: string) => Promise<void>;
+  copyPath: (path: string) => Promise<void>;
+  getSettings: () => Promise<AppSettings>;
+  setWordGoal: (goal: number) => Promise<{ wordGoal: number }>;
   readAsset: (from: string, href: string) => Promise<string | null>;
   openExternal: (url: string) => Promise<void>;
   watchFile: (path: string) => Promise<void>;

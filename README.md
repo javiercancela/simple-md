@@ -1,10 +1,14 @@
 # Simple MD
 
-A desktop Markdown editor. Open a folder, browse `.md` and `.markdown` files, edit them next to a preview, and tag files without moving them or writing the tags into the files.
+A desktop Markdown editor. Open a folder, browse `.md` and `.markdown` files, edit them with live Markdown styling, and tag or favorite files without writing that into the files.
 
-![Folder tree with the editor and preview](docs/screenshots/split-view.png)
+![Library, document list, and editor](docs/screenshots/library-light.png)
 
-![Files grouped by tag](docs/screenshots/tag-view.png)
+![The same library in dark appearance](docs/screenshots/library-dark.png)
+
+![Tag picker](docs/screenshots/tag-picker.png)
+
+![Focus mode](docs/screenshots/focus-dark.png)
 
 ## Run
 
@@ -17,7 +21,7 @@ npm start
 
 You can pass a folder path: `npm start -- /path/to/notes`.
 
-The sidebar lists Markdown files and any folder that contains one. Empty folders stay visible so a new folder shows up before its first file. Folders that contain only other file types are hidden. `.git` and `node_modules` are skipped. The folder is scanned in the background so a large folder does not freeze the window. Symlink cycles are skipped, and directories deeper than 40 levels are not walked.
+The sidebar is a library: All Documents, Recent (edited in the last 14 days), Favorites, the folder tree, and tags. The middle column lists the documents for the selected section. It is windowed, and the two-line snippets are read when a row is shown and then cached, so a folder of thousands of files does not read every file up front. Empty folders stay visible. Folders that contain only other file types are hidden. `.git` and `node_modules` are skipped. The folder is scanned in the background so a large folder does not freeze the window. Symlink cycles are skipped, and directories deeper than 40 levels are not walked. Search matches the file name, the path, and tags. A query that starts with `#` matches tag names.
 
 ### macOS
 
@@ -54,7 +58,7 @@ Tags live in the app, not in the Markdown. For each opened folder, Simple MD kee
 - Linux: `~/.config/Simple MD/indexes/`
 - Windows: `%APPDATA%\Simple MD\indexes\`
 
-The file name is the SHA-256 of the folder's real path. Each entry stores the tag names plus the file's device id, inode, size, and modification time. Saving a file does not rewrite it to include tags.
+The file name is the SHA-256 of the folder's real path. Each entry stores the tag names, whether the file is a favorite, plus the file's device id, inode, size, and modification time. Tag colors are chosen from a fixed palette (you can pick one when you create a tag) and stored in the same index. Saving a file does not rewrite it to include tags or favorites. There is no in-app trash view: Move to trash sends the file to the operating system's trash, and that trash cannot be listed here.
 
 On open, and whenever the file list changes, the index is reconciled:
 
@@ -66,13 +70,17 @@ On open, and whenever the file list changes, the index is reconciled:
 - Filesystem inode reuse after a delete can, rarely, attach old tags to a new file.
 - Symlinks that point outside the opened folder are ignored. Symlinks that resolve inside it are followed, and cycles are skipped.
 
-`settings.json` in the same userData directory remembers the last opened folder. Nothing else about the file contents is stored, and the app does not send telemetry.
+`settings.json` in the same userData directory remembers the last opened folder and the focus-mode word goal. Nothing else about the file contents is stored, and the app does not send telemetry.
 
 ## Preview
 
 GitHub Flavored Markdown is rendered in the app: tables, task lists, strikethrough, and fenced code with syntax highlighting. Relative links to other `.md` or `.markdown` files open in the app. Relative images (png, jpeg, gif, webp, avif) from inside the folder are shown. SVG and remote images are not loaded. External `http` and `https` links open in the default browser. HTML in the Markdown is escaped, and the rendered result is sanitized so scripts do not run.
 
-The view can be editor, preview, or split. Cmd/Ctrl+S saves. A dot marks unsaved edits, and leaving the file asks before discarding them. If the open file changes on disk, a clean buffer reloads and a dirty buffer asks first.
+Write is the default. Preview and a split view (More menu) are still there. The editor styles headings, emphasis, links, quotes, code, and task checkboxes while the Markdown source stays in the file. Cmd/Ctrl+S saves. The status bar shows the word count, a rough read time, and whether the file is saved. Leaving a dirty file asks before discarding it. If the open file changes on disk, a clean buffer reloads and a dirty buffer asks first.
+
+Focus mode (Cmd+Shift+F, or Ctrl+Shift+F) hides the library and list, forces the dark theme, dims every paragraph except the one you are in, and shows a word-goal meter. The goal is stored in `settings.json`. The rest of the app follows the operating system's light or dark appearance.
+
+The interface uses Inter and IBM Plex Mono, bundled from the `@fontsource` packages (SIL Open Font License). They are not loaded from the network. The content security policy keeps `font-src 'self'`. On macOS the window uses the native hidden-inset title bar; Windows and Linux keep the standard title bar. The traffic-light buttons are the system's, not drawn by the page.
 
 ## Unsigned builds
 
