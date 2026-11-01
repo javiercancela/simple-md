@@ -14,14 +14,18 @@ import {
   assetSchema,
   emptySchema,
   externalSchema,
+  favoriteSchema,
+  goalSchema,
   pathSchema,
   renameSchema,
+  tagColorSchema,
   tagQuerySchema,
   tagsSchema,
   watchSchema,
   writeFileSchema,
 } from "../shared/schemas";
 import { getLibrary, openLibrary } from "./library";
+import { readWordGoal, writeWordGoal } from "./settings";
 import { assertSender } from "./security";
 
 type IpcEvent = IpcMainInvokeEvent | IpcMainEvent;
@@ -78,6 +82,26 @@ export function registerIpc(
   handle(channels.setTags, tagsSchema, ({ path, tags }) => requireLibrary().setTags(path, tags));
   handle(channels.listTags, emptySchema, () => requireLibrary().listTags());
   handle(channels.filesForTag, tagQuerySchema, ({ tag }) => requireLibrary().filesForTag(tag));
+  handle(channels.setFavorite, favoriteSchema, ({ path, favorite }) =>
+    requireLibrary().setFavorite(path, favorite),
+  );
+  handle(channels.setTagColor, tagColorSchema, ({ tag, color }) => {
+    requireLibrary().setColor(tag, color);
+  });
+  handle(channels.snippet, pathSchema, ({ path }) => requireLibrary().snippet(path));
+  handle(channels.revealPath, pathSchema, ({ path }) => {
+    requireLibrary().reveal(path);
+  });
+  handle(channels.copyPath, pathSchema, ({ path }) => {
+    requireLibrary().copyPath(path);
+  });
+  handle(channels.getSettings, emptySchema, () => ({
+    wordGoal: readWordGoal(app.getPath("userData")),
+    platform: process.platform,
+  }));
+  handle(channels.setWordGoal, goalSchema, ({ goal }) => ({
+    wordGoal: writeWordGoal(app.getPath("userData"), goal),
+  }));
   handle(channels.readAsset, assetSchema, ({ from, href }) =>
     requireLibrary().readAsset(from, href),
   );

@@ -1,19 +1,21 @@
 import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
-import { shell } from "electron";
+import { clipboard, shell } from "electron";
 import {
   createFolder,
   createMarkdown,
   describePath,
+  readExcerpt,
   readImageDataUrl,
   readMarkdown,
   renameInside,
   writeMarkdown,
 } from "../core/files";
+import { isColorId } from "../core/colors";
 import { realRoot } from "../core/paths";
 import { scanRoot } from "../core/tree";
-import { TagIndex } from "../core/tags";
+import { TagIndex, type FileIdentity } from "../core/tags";
 import type { ExternalFileEvent, SessionInfo, TagCount, TreeNode } from "../shared/types";
 import { writeLastRoot } from "./settings";
 
@@ -63,7 +65,9 @@ export class Library {
   readonly root: string;
   private readonly tags: TagIndex;
   private tree: TreeNode[] = [];
+  private files: FileIdentity[] = [];
   private signature = "";
+  private fileSignature = "";
   private timer: NodeJS.Timeout | null = null;
   private generation = 0;
   private polling = false;
@@ -93,21 +97,41 @@ export class Library {
   }
 
   session(): SessionInfo {
-    return { root: this.root, tree: this.tree };
+    return {
+      root: this.root,
+      tree: this.tree,
+      catalog: this.files.map((file) => ({
+        path: file.path,
+        name: file.path.split("/").pop() ?? file.path,
+        mtimeMs: file.mtimeMs,
+        favorite: this.tags.isFavorite(file.path),
+        tags: this.tags.tagsFor(file.path),
+      })),
+      colors: this.tags.colors(),
+    };
   }
 
-  read(rel: string): { content: string; mtimeMs: number; tags: string[] } {
+  read(rel: string): { content: string; mtimeMs: number; tags: string[]; favorite: boolean } {
     const { content, identity } = readMarkdown(this.root, rel);
     this.watched = identity.path;
     this.baseline = { hash: hashContent(content), missing: false };
-    return { content, mtimeMs: identity.mtimeMs, tags: this.tags.tagsFor(identity.path) };
+    return {
+      content,
+      mtimeMs: identity.mtimeMs,
+      tags: this.tags.tagsFor(identity.path),
+      favorite: this.tags.isFavorite(identity.path),
+    };
   }
 
   write(rel: string, content: string): { mtimeMs: number } {
     const identity = writeMarkdown(this.root, rel, content);
     this.tags.noteIdentity(identity.path, identity);
+    const index = this.files.findIndex((file) => file.path === identity.path);
+    if (index >= 0) this.files[index] = identity;
+    else this.files.push(identity);
     if (this.watched === identity.path)
       this.baseline = { hash: hashContent(content), missing: false };
+    this.publish();
     return { mtimeMs: identity.mtimeMs };
   }
 
@@ -154,7 +178,34 @@ export class Library {
 
   setTags(rel: string, tags: string[]): string[] {
     const { identity } = readMarkdown(this.root, rel);
-    return this.tags.setTags(identity.path, tags, identity);
+    const next = this.tags.setTags(identity.path, tags, identity);
+    this.publish();
+    return next;
+  }
+
+  setFavorite(rel: string, favorite: boolean): boolean {
+    const { identity } = readMarkdown(this.root, rel);
+    const next = this.tags.setFavorite(identity.path, favorite, identity);
+    this.publish();
+    return next;
+  }
+
+  setColor(tag: string, color: string): void {
+    if (!isColorId(color)) throw new Error("Invalid tag color");
+    this.tags.setColor(tag, color);
+    this.publish();
+  }
+
+  snippet(rel: string): string {
+    return readExcerpt(this.root, rel);
+  }
+
+  reveal(rel: string): void {
+    shell.showItemInFolder(describePath(this.root, rel).abs);
+  }
+
+  copyPath(rel: string): void {
+    clipboard.writeText(describePath(this.root, rel).abs);
   }
 
   listTags(): TagCount[] {
@@ -185,12 +236,21 @@ export class Library {
     const scan = await scanRoot(this.root);
     if (generation !== this.generation) return this.tree;
     const next = JSON.stringify(scan.tree);
-    const changed = next !== this.signature;
+    const fileSig = scan.files
+      .map((file) => `${file.path}\0${file.mtimeMs}\0${file.ino}`)
+      .join("\n");
+    const changed = next !== this.signature || fileSig !== this.fileSignature;
     this.tree = scan.tree;
+    this.files = scan.files;
     this.signature = next;
+    this.fileSignature = fileSig;
     if (changed) this.tags.reconcile(scan.files);
-    if (changed || force) sink.library(this.session());
+    if (changed || force) this.publish();
     return this.tree;
+  }
+
+  private publish(): void {
+    sink.library(this.session());
   }
 
   private async poll(): Promise<void> {

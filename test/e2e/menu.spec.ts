@@ -52,7 +52,7 @@ test("menu commands create and save, and standard roles are present", async () =
   const app = await launch(root, userData);
   try {
     const page = await app.firstWindow();
-    await page.locator('[data-testid="tree-file"][data-path="Welcome.md"]').waitFor();
+    await page.locator('[data-testid="doc"][data-path="Welcome.md"]').waitFor();
 
     const accelerators = await app.evaluate(({ Menu }) => {
       const menu = Menu.getApplicationMenu();
@@ -86,9 +86,9 @@ test("menu commands create and save, and standard roles are present", async () =
     await clickMenu(app, "new-file");
     await expect(page.getByRole("heading", { name: "New file" })).toBeVisible();
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.locator('[data-testid="tree-file"][data-path="untitled.md"]')).toBeVisible();
+    await expect(page.locator('[data-testid="doc"][data-path="untitled.md"]')).toBeVisible();
 
-    await page.locator('[data-testid="tree-file"][data-path="Welcome.md"]').click();
+    await page.locator('[data-testid="doc"][data-path="Welcome.md"]').click();
     const editor = page.locator(".cm-content");
     await editor.click();
     await page.keyboard.press("Control+End");
@@ -108,7 +108,7 @@ test("quit exits, and a dirty buffer asks before the process exits", async () =>
   const app = await launch(root, userData);
   try {
     const page = await app.firstWindow();
-    await page.locator('[data-testid="tree-file"][data-path="Welcome.md"]').click();
+    await page.locator('[data-testid="doc"][data-path="Welcome.md"]').click();
     await page.locator(".cm-content").click();
     await page.keyboard.type("not saved");
     await expect(page.getByTestId("dirty")).toBeVisible();
@@ -136,7 +136,7 @@ test("quit with a clean window exits the process", async () => {
   const { root, userData } = await setup();
   const app = await launch(root, userData);
   const page = await app.firstWindow();
-  await page.locator('[data-testid="tree-file"][data-path="Welcome.md"]').waitFor();
+  await page.locator('[data-testid="doc"][data-path="Welcome.md"]').waitFor();
   const exit = exited(app);
   await clickMenu(app, "quit");
   await expect.poll(() => exit.then((code) => code ?? 0), { timeout: 10000 }).toBe(0);

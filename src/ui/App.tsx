@@ -2,10 +2,31 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { decideExternalChange } from "../core/external";
 import { classifyHref } from "../core/links";
 import { renderMarkdown } from "../core/markdown";
-import type { ExternalFileEvent, SessionInfo, TagCount, TreeNode, ViewMode } from "../shared/types";
-import { Editor } from "./Editor";
-import { Preview } from "./Preview";
-import { FileTree, collectPaths, filterTree, folderPaths } from "./Tree";
+import type { TagColorId } from "../core/colors";
+import type {
+  CatalogFile,
+  ExternalFileEvent,
+  SessionInfo,
+  TreeNode,
+  ViewMode,
+} from "../shared/types";
+import { DocColumn } from "./DocColumn";
+import {
+  editedLabel,
+  filterLabel,
+  isRecent,
+  modLabel,
+  readMinutes,
+  tagCounts,
+  visibleDocs,
+  wordCount,
+  type DocSort,
+  type LibraryFilter,
+} from "./docs";
+import { EditorPane } from "./EditorPane";
+import type { FormatKind } from "./format";
+import { Sidebar } from "./Sidebar";
+import { collectPaths } from "./Tree";
 
 type DialogState =
   | { kind: "discard" }
@@ -13,6 +34,14 @@ type DialogState =
   | { kind: "confirm"; title: string; body: string; confirm: string };
 
 type DiskNotice = { kind: "changed"; content: string } | { kind: "removed" };
+
+type SessionState = {
+  root: string;
+  rootName: string;
+  tree: TreeNode[];
+  catalog: CatalogFile[];
+  colors: Record<string, string>;
+};
 
 function basename(root: string): string {
   const parts = root.split(/[/\\]/).filter(Boolean);
@@ -64,21 +93,64 @@ function errorText(error: unknown): string {
   return index >= 0 ? raw.slice(index + marker.length) : raw;
 }
 
+function detectPlatform(): string {
+  const agent = navigator.userAgent;
+  if (agent.includes("Mac")) return "darwin";
+  if (agent.includes("Windows")) return "win32";
+  return "linux";
+}
+
+function usePrefersDark(): boolean {
+  const [dark, setDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = () => setDark(media.matches);
+    media.addEventListener("change", apply);
+    return () => media.removeEventListener("change", apply);
+  }, []);
+  return dark;
+}
+
+function folderCounts(catalog: readonly CatalogFile[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const file of catalog) {
+    const parts = file.path.split("/");
+    parts.pop();
+    let folder = "";
+    for (const part of parts) {
+      folder = folder ? `${folder}/${part}` : part;
+      counts.set(folder, (counts.get(folder) ?? 0) + 1);
+    }
+  }
+  return counts;
+}
+
+function isFocusShortcut(event: KeyboardEvent): boolean {
+  if (event.key.toLowerCase() !== "f" || event.altKey) return false;
+  if (event.metaKey && event.ctrlKey && !event.shiftKey) return true;
+  return (event.metaKey || event.ctrlKey) && event.shiftKey;
+}
+
+function isFindShortcut(event: KeyboardEvent): boolean {
+  if (event.key.toLowerCase() !== "f" || event.altKey || event.shiftKey) return false;
+  if (event.metaKey && event.ctrlKey) return false;
+  return event.metaKey || event.ctrlKey;
+}
+
 export function App() {
-  const [session, setSession] = useState<{
-    root: string;
-    rootName: string;
-    tree: TreeNode[];
-  } | null>(null);
+  const [session, setSession] = useState<SessionState | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<string | null>(null);
   const [selectedKind, setSelectedKind] = useState<"file" | "folder" | null>(null);
   const [query, setQuery] = useState("");
-  const [sidebar, setSidebar] = useState<"files" | "tags">("files");
-  const [tags, setTags] = useState<TagCount[]>([]);
-  const [activeTag, setActiveTag] = useState<string | null>(null);
-  const [tagFiles, setTagFiles] = useState<string[]>([]);
-  const [mode, setMode] = useState<ViewMode>("split");
+  const [filter, setFilter] = useState<LibraryFilter>({ type: "all" });
+  const [sort, setSort] = useState<DocSort>("edited");
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [focus, setFocus] = useState(false);
+  const [mode, setMode] = useState<ViewMode>("editor");
+  const [goal, setGoal] = useState(500);
+  const [platform, setPlatform] = useState(detectPlatform);
   const [filePath, setFilePath] = useState<string | null>(null);
   const [buffer, setBuffer] = useState("");
   const [saved, setSaved] = useState("");
@@ -90,17 +162,17 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [draft, setDraft] = useState("");
-  const [tagDraft, setTagDraft] = useState("");
 
   const rootRef = useRef<string | null>(null);
   const filePathRef = useRef<string | null>(null);
   const bufferRef = useRef("");
   const savedRef = useRef("");
   const fileTagsRef = useRef<string[]>([]);
-  const activeTagRef = useRef<string | null>(null);
   const dialogRef = useRef<DialogState | null>(null);
   const resolver = useRef<(value: unknown) => void>(() => {});
   const closingRef = useRef(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const formatRef = useRef<(kind: FormatKind) => void>(() => {});
   const actions = useRef({
     save: async (): Promise<boolean> => true,
     openFolder: async () => {},
@@ -111,18 +183,28 @@ export function App() {
     library: (_session: SessionInfo) => {},
   });
 
+  const osDark = usePrefersDark();
+  const dark = focus || osDark;
   const dirty = filePath !== null && buffer !== saved;
   const html = useMemo(
     () => (filePath ? renderMarkdown(previewSource) : ""),
     [filePath, previewSource],
   );
-  const visibleTree = useMemo(() => filterTree(session?.tree ?? [], query), [session, query]);
-  const shownExpanded = query.trim() ? folderPaths(visibleTree) : expanded;
-  const visibleTagFiles = tagFiles.filter((file) => {
-    const name = file.split("/").pop() ?? file;
-    const needle = query.trim().toLowerCase();
-    return !needle || name.toLowerCase().includes(needle);
-  });
+  const catalog = session?.catalog ?? [];
+  const docs = useMemo(
+    () => visibleDocs(catalog, filter, query, sort),
+    [catalog, filter, query, sort],
+  );
+  const tags = useMemo(() => tagCounts(catalog), [catalog]);
+  const counts = useMemo(() => folderCounts(catalog), [catalog]);
+  const words = useMemo(() => wordCount(filePath ? buffer : ""), [buffer, filePath]);
+  const openFile = catalog.find((file) => file.path === filePath);
+  const goalPct = Math.min(100, Math.round((words / Math.max(goal, 1)) * 100));
+  const shortcutMod = modLabel(platform);
+
+  useEffect(() => {
+    document.documentElement.classList.toggle("dark", dark);
+  }, [dark]);
 
   function commitFile(rel: string | null, content: string, nextTags: string[], hash = ""): void {
     filePathRef.current = rel;
@@ -143,42 +225,35 @@ export function App() {
     setSession((current) => (current ? { ...current, tree } : current));
   }
 
-  async function refreshTags(): Promise<void> {
-    try {
-      const list = await window.md.listTags();
-      setTags(list);
-      const current = activeTagRef.current;
-      if (!current) return;
-      if (!list.some((item) => item.tag.toLowerCase() === current.toLowerCase())) {
-        activeTagRef.current = null;
-        setActiveTag(null);
-        setTagFiles([]);
-        return;
-      }
-      setTagFiles(await window.md.filesForTag(current));
-    } catch (reason) {
-      setError(errorText(reason));
-    }
-  }
-
   function applySession(next: SessionInfo): void {
     const changed = rootRef.current !== next.root;
     rootRef.current = next.root;
-    setSession({ root: next.root, rootName: basename(next.root), tree: next.tree });
-    if (changed) {
-      setExpanded(defaultExpanded(next.tree));
-      commitFile(null, "", []);
-      void window.md.unwatch();
-      setQuery("");
-      setSidebar("files");
-      activeTagRef.current = null;
-      setActiveTag(null);
-      setTagFiles([]);
-      setSelected(null);
-      setSelectedKind(null);
-      setError(null);
+    setSession({
+      root: next.root,
+      rootName: basename(next.root),
+      tree: next.tree,
+      catalog: next.catalog ?? [],
+      colors: next.colors ?? {},
+    });
+    if (!changed) {
+      const open = filePathRef.current;
+      const row = open ? next.catalog?.find((file) => file.path === open) : undefined;
+      if (row && row.tags.join("\0") !== fileTagsRef.current.join("\0")) {
+        fileTagsRef.current = row.tags;
+        setFileTags(row.tags);
+      }
+      return;
     }
-    void refreshTags();
+    setExpanded(defaultExpanded(next.tree));
+    commitFile(null, "", []);
+    void window.md.unwatch();
+    setQuery("");
+    setFilter({ type: "all" });
+    setPickerOpen(false);
+    setFocus(false);
+    setSelected(null);
+    setSelectedKind(null);
+    setError(null);
   }
 
   async function save(): Promise<boolean> {
@@ -225,6 +300,7 @@ export function App() {
 
   async function loadFile(rel: string, hash = ""): Promise<void> {
     const file = await window.md.readFile(rel);
+    setPickerOpen(false);
     commitFile(rel, file.content, file.tags, hash);
     setSelected(rel);
     setSelectedKind("file");
@@ -295,6 +371,7 @@ export function App() {
       adoptTree(created.tree);
       setSelected(created.path);
       setSelectedKind("folder");
+      setFilter({ type: "folder", path: created.path });
       setExpanded((current) => {
         const next = new Set(current);
         for (const ancestor of ancestorPaths(created.path)) next.add(ancestor);
@@ -319,9 +396,10 @@ export function App() {
       adoptTree(result.tree);
       const nextSelected = remap(selected, result.from, result.to);
       setSelected(nextSelected);
-      setSelectedKind(
-        result.from === selected && selectedKind === "folder" ? "folder" : selectedKind,
-      );
+      if (filter.type === "folder") {
+        const nextFolder = remap(filter.path, result.from, result.to);
+        if (nextFolder !== filter.path) setFilter({ type: "folder", path: nextFolder });
+      }
       const open = filePathRef.current;
       if (open) {
         const nextFile = remap(open, result.from, result.to);
@@ -360,51 +438,36 @@ export function App() {
       setSelected(null);
       setSelectedKind(null);
       setError(null);
-      await refreshTags();
     } catch (reason) {
       setError(errorText(reason));
     }
   }
 
-  async function addTag(raw: string): Promise<void> {
+  async function writeTags(next: string[], color?: TagColorId): Promise<void> {
     const rel = filePathRef.current;
-    if (!rel || !raw.trim()) return;
+    if (!rel) return;
     try {
-      const next = await window.md.setTags(rel, [...fileTagsRef.current, raw]);
-      fileTagsRef.current = next;
-      setFileTags(next);
-      setTagDraft("");
-      await refreshTags();
+      const stored = await window.md.setTags(rel, next);
+      fileTagsRef.current = stored;
+      setFileTags(stored);
+      const named = next[next.length - 1];
+      if (color && named) await window.md.setTagColor(named, color);
       setError(null);
     } catch (reason) {
       setError(errorText(reason));
     }
   }
 
-  async function removeTag(tag: string): Promise<void> {
-    const rel = filePathRef.current;
-    if (!rel) return;
-    try {
-      const next = await window.md.setTags(
-        rel,
-        fileTagsRef.current.filter((item) => item !== tag),
-      );
-      fileTagsRef.current = next;
-      setFileTags(next);
-      await refreshTags();
-    } catch (reason) {
-      setError(errorText(reason));
-    }
+  function toggleTag(tag: string): void {
+    const has = fileTagsRef.current.some((item) => item.toLowerCase() === tag.toLowerCase());
+    const next = has
+      ? fileTagsRef.current.filter((item) => item.toLowerCase() !== tag.toLowerCase())
+      : [...fileTagsRef.current, tag];
+    void writeTags(next);
   }
 
-  async function selectTag(tag: string): Promise<void> {
-    activeTagRef.current = tag;
-    setActiveTag(tag);
-    try {
-      setTagFiles(await window.md.filesForTag(tag));
-    } catch (reason) {
-      setError(errorText(reason));
-    }
+  function createTag(tag: string, color: TagColorId): void {
+    void writeTags([...fileTagsRef.current, tag], color);
   }
 
   function onNavigate(href: string): void {
@@ -424,19 +487,28 @@ export function App() {
       void openPath(action.path, action.hash).catch((reason) => setError(errorText(reason)));
   }
 
-  function onSelect(node: TreeNode): void {
-    if (node.kind === "folder") {
-      setExpanded((current) => {
-        const next = new Set(current);
-        if (next.has(node.path)) next.delete(node.path);
-        else next.add(node.path);
-        return next;
-      });
-      setSelected(node.path);
-      setSelectedKind("folder");
-      return;
+  function onSelectFolder(node: TreeNode): void {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(node.path)) next.delete(node.path);
+      else next.add(node.path);
+      return next;
+    });
+    setSelected(node.path);
+    setSelectedKind("folder");
+    setFilter({ type: "folder", path: node.path });
+  }
+
+  function pickLibrary(type: "all" | "recent" | "favorites"): void {
+    setFilter({ type });
+    const open = filePathRef.current;
+    if (open) {
+      setSelected(open);
+      setSelectedKind("file");
+    } else {
+      setSelected(null);
+      setSelectedKind(null);
     }
-    void openPath(node.path).catch((reason) => setError(errorText(reason)));
   }
 
   actions.current = {
@@ -491,13 +563,39 @@ export function App() {
   }, [dirty, filePath]);
 
   useEffect(() => {
+    if (!pickerOpen) return;
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest("[data-picker-root]")) return;
+      setPickerOpen(false);
+    };
+    window.addEventListener("pointerdown", onPointer);
+    return () => window.removeEventListener("pointerdown", onPointer);
+  }, [pickerOpen]);
+
+  useEffect(() => {
     void window.md.ready();
+    void window.md.getSettings().then((settings) => {
+      setGoal(settings.wordGoal);
+      if (settings.platform) setPlatform(settings.platform);
+    });
     const onKey = (event: KeyboardEvent) => {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s" && !event.shiftKey) {
         event.preventDefault();
         void actions.current.save();
       }
       if (event.key === "Escape" && dialogRef.current) closeDialog(null);
+      if (isFocusShortcut(event)) {
+        event.preventDefault();
+        if (filePathRef.current) setFocus((value) => !value);
+      } else if (isFindShortcut(event)) {
+        event.preventDefault();
+        setFocus(false);
+        window.setTimeout(() => {
+          searchRef.current?.focus();
+          searchRef.current?.select();
+        }, 0);
+      }
     };
     window.addEventListener("keydown", onKey);
     const offs = [
@@ -518,285 +616,158 @@ export function App() {
     };
   }, []);
 
-  const showEditor = mode !== "preview";
-  const showPreview = mode !== "editor";
+  const now = Date.now();
+  const recentCount = catalog.filter((file) => isRecent(file.mtimeMs, now)).length;
+  const favoriteCount = catalog.filter((file) => file.favorite).length;
+  const rootName = session?.rootName ?? "";
+  const parent = filePath ? parentPath(filePath) : "";
+  const folderName = !filePath ? "" : parent ? (parent.split("/").pop() ?? parent) : rootName;
 
   return (
-    <div className="app" data-testid="app">
-      <aside className="sidebar" data-testid="sidebar">
-        <div className="brand">
-          <span className="mark" aria-hidden="true">
-            #
-          </span>
-          <div>
-            <strong>Simple MD</strong>
-            <div className="root-name" title={session?.root ?? ""}>
-              {session?.rootName ?? "No folder"}
-            </div>
-          </div>
-        </div>
-        <div className="side-actions">
-          <button type="button" data-testid="open-folder" onClick={() => void openFolder()}>
-            Open folder
-          </button>
-          <button
-            type="button"
-            data-testid="new-file"
-            disabled={!session}
-            onClick={() => void newFile()}
-          >
-            New file
-          </button>
-          <button
-            type="button"
-            data-testid="new-folder"
-            disabled={!session}
-            onClick={() => void newFolder()}
-          >
-            New folder
-          </button>
-          <button
-            type="button"
-            data-testid="rename"
-            disabled={!selected}
-            onClick={() => void renameSelected()}
-          >
-            Rename
-          </button>
-          <button
-            type="button"
-            data-testid="delete"
-            disabled={!selected}
-            onClick={() => void trashSelected()}
-          >
-            Delete
-          </button>
-        </div>
-        <input
-          className="search"
-          data-testid="search"
-          placeholder="Filter by file name"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-        <div className="tabs" role="tablist">
-          <button
-            type="button"
-            data-testid="tab-files"
-            aria-pressed={sidebar === "files"}
-            onClick={() => setSidebar("files")}
-          >
-            Files
-          </button>
-          <button
-            type="button"
-            data-testid="tab-tags"
-            aria-pressed={sidebar === "tags"}
-            onClick={() => setSidebar("tags")}
-          >
-            Tags
-          </button>
-        </div>
-        <div className="side-scroll">
-          {sidebar === "files" ? (
-            session ? (
-              <div data-testid="tree">
-                <FileTree
-                  nodes={visibleTree}
-                  depth={0}
-                  expanded={shownExpanded}
-                  selected={selected}
-                  onSelect={onSelect}
-                />
-              </div>
-            ) : (
-              <p className="side-empty">Open a folder to browse Markdown files.</p>
-            )
-          ) : (
-            <div data-testid="tag-view">
-              {tags.length === 0 ? <p className="side-empty">No tags yet.</p> : null}
-              <ul className="tag-list">
-                {tags.map((tag) => (
-                  <li key={tag.tag}>
-                    <button
-                      type="button"
-                      className="tag-row"
-                      data-testid="tag"
-                      data-tag={tag.tag}
-                      aria-pressed={activeTag === tag.tag}
-                      onClick={() => void selectTag(tag.tag)}
-                    >
-                      <span>{tag.tag}</span>
-                      <span className="count">{tag.count}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              {activeTag ? (
-                <ul className="tag-files">
-                  {visibleTagFiles.map((file) => (
-                    <li key={file}>
-                      <button
-                        type="button"
-                        data-testid="tag-file"
-                        data-path={file}
-                        onClick={() => void openPath(file)}
-                      >
-                        {file}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-          )}
-        </div>
-      </aside>
-      <main className="workspace">
-        {session && filePath ? (
-          <>
-            <header className="toolbar">
-              <div className="file-heading">
-                {dirty ? (
-                  <span className="dirty" data-testid="dirty" title="Unsaved changes" />
-                ) : null}
-                <div>
-                  <div className="file-name">{filePath.split("/").pop()}</div>
-                  <div className="file-path">{filePath}</div>
-                </div>
-              </div>
-              <div className="file-tags">
-                {fileTags.map((tag) => (
-                  <span className="chip" key={tag} data-testid="tag-chip">
-                    {tag}
-                    <button
-                      type="button"
-                      aria-label={`Remove ${tag}`}
-                      onClick={() => void removeTag(tag)}
-                    >
-                      ×
-                    </button>
-                  </span>
-                ))}
-                <input
-                  data-testid="tag-input"
-                  placeholder="Add tag"
-                  value={tagDraft}
-                  onChange={(event) => setTagDraft(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void addTag(tagDraft);
-                    }
-                  }}
-                />
-              </div>
-              <div className="toolbar-end">
-                <button
-                  type="button"
-                  data-testid="save"
-                  disabled={!dirty}
-                  onClick={() => void save()}
-                >
-                  Save
-                </button>
-                <div className="modes" role="radiogroup" aria-label="View">
-                  {(
-                    [
-                      ["editor", "Editor"],
-                      ["split", "Split"],
-                      ["preview", "Preview"],
-                    ] as const
-                  ).map(([value, label]) => (
-                    <button
-                      key={value}
-                      type="button"
-                      role="radio"
-                      aria-checked={mode === value}
-                      data-testid={`mode-${value}`}
-                      className={mode === value ? "on" : ""}
-                      onClick={() => setMode(value)}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </header>
-            {error ? (
-              <div className="banner" data-testid="error" role="alert">
-                {error}
-              </div>
-            ) : null}
-            {diskNotice ? (
-              <div className="banner notice" data-testid="disk-notice">
-                <span>
-                  {diskNotice.kind === "changed"
-                    ? "This file changed on disk."
-                    : "This file was removed on disk."}
-                </span>
-                {diskNotice.kind === "changed" ? (
-                  <button
-                    type="button"
-                    data-testid="reload-disk"
-                    onClick={() => commitFile(filePath, diskNotice.content, fileTags)}
-                  >
-                    Reload
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    data-testid="close-removed"
-                    onClick={() => {
-                      commitFile(null, "", []);
-                      void window.md.unwatch();
-                      setDiskNotice(null);
-                    }}
-                  >
-                    Close
-                  </button>
-                )}
-                <button type="button" onClick={() => setDiskNotice(null)}>
-                  Keep editing
-                </button>
-              </div>
-            ) : null}
-            <div className={`panes panes-${mode}`}>
-              {showEditor ? (
-                <Editor
-                  path={filePath}
-                  text={buffer}
-                  revision={revision}
-                  onChange={(value) => {
-                    bufferRef.current = value;
-                    setBuffer(value);
-                  }}
-                  onSave={() => void save()}
-                />
-              ) : null}
-              {showPreview ? (
-                <Preview
-                  html={html}
-                  fromRel={filePath}
-                  hash={pendingHash}
-                  onNavigate={onNavigate}
-                />
-              ) : null}
-            </div>
-          </>
-        ) : (
-          <div className="empty" data-testid="empty">
-            <h1>Simple MD</h1>
-            <p>{session ? "Select a Markdown file." : "Open a folder of Markdown files."}</p>
-            {session ? null : (
-              <button type="button" onClick={() => void openFolder()}>
-                Open folder
-              </button>
-            )}
-            {error ? <p className="empty-error">{error}</p> : null}
-          </div>
-        )}
-      </main>
+    <div
+      className={`shell${focus ? " is-focus" : ""}${sidebarOpen ? "" : " sidebar-hidden"} platform-${platform}`}
+      data-testid="app"
+    >
+      <Sidebar
+        open={sidebarOpen}
+        platform={platform}
+        filter={filter}
+        tree={session?.tree ?? []}
+        expanded={expanded}
+        selected={selected}
+        counts={counts}
+        allCount={catalog.length}
+        recentCount={recentCount}
+        favoriteCount={favoriteCount}
+        tags={tags}
+        colors={session?.colors ?? {}}
+        dark={dark}
+        openShortcut={`${shortcutMod}${platform === "darwin" ? "O" : "+O"}`}
+        onHide={() => setSidebarOpen(false)}
+        onAll={() => pickLibrary("all")}
+        onRecent={() => pickLibrary("recent")}
+        onFavorites={() => pickLibrary("favorites")}
+        onTag={(tag) => setFilter({ type: "tag", tag })}
+        onAddTag={() => {
+          if (!filePathRef.current) {
+            setError("Open a document before adding a tag.");
+            return;
+          }
+          setPickerOpen(true);
+        }}
+        onOpenFolder={() => void openFolder()}
+        onSelectFolder={onSelectFolder}
+      />
+      <DocColumn
+        title={session ? filterLabel(filter) : "All Documents"}
+        countLabel={`${docs.length} ${docs.length === 1 ? "document" : "documents"}`}
+        query={query}
+        sort={sort}
+        rows={docs}
+        selected={filePath}
+        colors={session?.colors ?? {}}
+        dark={dark}
+        searchRef={searchRef}
+        findHint={platform === "darwin" ? "⌘F" : "Ctrl+F"}
+        onQuery={setQuery}
+        onSort={() =>
+          setSort((current) =>
+            current === "edited"
+              ? "title"
+              : current === "title"
+                ? "title-desc"
+                : current === "title-desc"
+                  ? "edited-asc"
+                  : "edited",
+          )
+        }
+        onNew={() => void newFile()}
+        onOpen={(path) => void openPath(path).catch((reason) => setError(errorText(reason)))}
+        onFavorite={(path) => {
+          const file = catalog.find((item) => item.path === path);
+          void window.md.setFavorite(path, !(file?.favorite ?? false)).catch((reason) => {
+            setError(errorText(reason));
+          });
+        }}
+        sidebarHidden={!sidebarOpen}
+        onShowSidebar={() => setSidebarOpen(true)}
+      />
+      <EditorPane
+        sessionOpen={session !== null}
+        filePath={filePath}
+        folderLabel={folderName}
+        fileLabel={filePath?.split("/").pop() ?? ""}
+        edited={openFile ? editedLabel(openFile.mtimeMs) : ""}
+        tags={fileTags}
+        tagList={tags}
+        colors={session?.colors ?? {}}
+        dark={dark}
+        mode={mode}
+        focus={focus}
+        dirty={dirty}
+        words={words.toLocaleString("en-US")}
+        readTime={readMinutes(words)}
+        goal={goal}
+        goalPct={goalPct}
+        focusShortcut={platform === "darwin" ? "⌘⇧F" : "Ctrl+Shift+F"}
+        html={html}
+        hash={pendingHash}
+        revision={revision}
+        buffer={buffer}
+        error={error}
+        diskNotice={diskNotice}
+        pickerOpen={pickerOpen}
+        formatRef={formatRef}
+        onMode={setMode}
+        onFocus={() => {
+          if (filePath) setFocus(true);
+        }}
+        onExitFocus={() => setFocus(false)}
+        onGoal={(value) => {
+          if (!Number.isInteger(value) || value < 50 || value > 20_000) return;
+          setGoal(value);
+          void window.md.setWordGoal(value).catch((reason) => setError(errorText(reason)));
+        }}
+        onChange={(value) => {
+          bufferRef.current = value;
+          setBuffer(value);
+        }}
+        onSave={() => void save()}
+        onNavigate={onNavigate}
+        onRemoveTag={(tag) => void writeTags(fileTagsRef.current.filter((item) => item !== tag))}
+        onToggleTag={toggleTag}
+        onCreateTag={createTag}
+        onPicker={setPickerOpen}
+        onFavorite={() => {
+          if (!filePath) return;
+          void window.md.setFavorite(filePath, !(openFile?.favorite ?? false)).catch((reason) => {
+            setError(errorText(reason));
+          });
+        }}
+        favorite={openFile?.favorite ?? false}
+        onReveal={() => {
+          if (!filePath) return;
+          void window.md.revealPath(filePath).catch((reason) => setError(errorText(reason)));
+        }}
+        onCopyPath={() => {
+          if (!filePath) return;
+          void window.md.copyPath(filePath).catch((reason) => setError(errorText(reason)));
+        }}
+        onRename={() => void renameSelected()}
+        onTrash={() => void trashSelected()}
+        onNewFolder={() => void newFolder()}
+        onReload={() => {
+          if (diskNotice?.kind === "changed" && filePath)
+            commitFile(filePath, diskNotice.content, fileTags);
+        }}
+        onCloseRemoved={() => {
+          commitFile(null, "", []);
+          void window.md.unwatch();
+          setDiskNotice(null);
+        }}
+        onDismissNotice={() => setDiskNotice(null)}
+        onOpenFolder={() => void openFolder()}
+      />
       {dialog ? (
         <div className="modal-backdrop" role="presentation">
           <div

@@ -104,6 +104,26 @@ describe("TagIndex", () => {
     expect(index.listTags()).toEqual([]);
   });
 
+  it("keeps a favorite when the file has no tags and restores it after a rename", () => {
+    const root = tempDir();
+    fs.writeFileSync(path.join(root, "a.md"), "a");
+    const index = TagIndex.open(path.join(root, "index.json"), root);
+    index.setFavorite("a.md", true, identity(root, "a.md"));
+    index.setTags("a.md", [], identity(root, "a.md"));
+    expect(index.tagsFor("a.md")).toEqual([]);
+    expect(index.isFavorite("a.md")).toBe(true);
+    index.setColor("a.md", "blue");
+    expect(index.colors()).toEqual({ "a.md": "blue" });
+
+    fs.renameSync(path.join(root, "a.md"), path.join(root, "b.md"));
+    index.reconcile([identity(root, "b.md")]);
+    expect(index.isFavorite("b.md")).toBe(true);
+    expect(index.isFavorite("a.md")).toBe(false);
+    index.setFavorite("b.md", false, identity(root, "b.md"));
+    expect(index.isFavorite("b.md")).toBe(false);
+    expect(index.tagsFor("b.md")).toEqual([]);
+  });
+
   it("reloads tags from disk and replaces a corrupt index", () => {
     const root = tempDir();
     const indexFile = path.join(root, "index.json");

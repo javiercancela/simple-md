@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { isColorId, type TagColorId } from "./colors";
 import { writeAtomic } from "./atomic";
 
 export type FileIdentity = {
@@ -13,6 +14,7 @@ export type TagCount = { tag: string; count: number };
 
 type Entry = {
   tags: string[];
+  favorite?: boolean;
   ino: string;
   dev: string;
   size: number;
@@ -23,6 +25,7 @@ type IndexData = {
   version: 1;
   root: string;
   files: Record<string, Entry>;
+  colors: Record<string, string>;
 };
 
 const TAG = /^[\p{L}\p{N}][\p{L}\p{N} ._-]{0,39}$/u;
@@ -43,7 +46,7 @@ export function normalizeTags(input: readonly string[]): string[] {
 }
 
 function empty(root: string): IndexData {
-  return { version: 1, root, files: {} };
+  return { version: 1, root, files: {}, colors: {} };
 }
 
 function isEntry(value: unknown): value is Entry {
@@ -54,10 +57,19 @@ function isEntry(value: unknown): value is Entry {
   );
 }
 
+function parseColors(value: unknown): Record<string, string> {
+  if (!value || typeof value !== "object") return {};
+  const colors: Record<string, string> = {};
+  for (const [key, color] of Object.entries(value)) {
+    if (typeof color === "string" && isColorId(color)) colors[key.toLowerCase()] = color;
+  }
+  return colors;
+}
+
 function parseIndex(raw: string, root: string): IndexData {
   const parsed: unknown = JSON.parse(raw);
   if (!parsed || typeof parsed !== "object") throw new Error("bad index");
-  const record = parsed as { version?: unknown; root?: unknown; files?: unknown };
+  const record = parsed as { version?: unknown; root?: unknown; files?: unknown; colors?: unknown };
   if (
     record.version !== 1 ||
     record.root !== root ||
@@ -71,17 +83,26 @@ function parseIndex(raw: string, root: string): IndexData {
     if (!isEntry(value)) continue;
     files[key] = {
       tags: value.tags.filter((tag): tag is string => typeof tag === "string"),
+      ...(value.favorite === true ? { favorite: true } : {}),
       ino: value.ino,
       dev: value.dev,
       size: typeof value.size === "number" ? value.size : 0,
       mtimeMs: typeof value.mtimeMs === "number" ? value.mtimeMs : 0,
     };
   }
-  return { version: 1, root, files };
+  return { version: 1, root, files, colors: parseColors(record.colors) };
 }
 
 function identityOf(file: FileIdentity): Pick<Entry, "ino" | "dev" | "size" | "mtimeMs"> {
   return { ino: file.ino, dev: file.dev, size: file.size, mtimeMs: file.mtimeMs };
+}
+
+function withFavorite(entry: Entry, favorite: boolean): Entry {
+  if (!favorite) {
+    const { favorite: _drop, ...rest } = entry;
+    return rest;
+  }
+  return { ...entry, favorite: true };
 }
 
 export class TagIndex {
@@ -104,15 +125,49 @@ export class TagIndex {
     return [...(this.data.files[filePath]?.tags ?? [])];
   }
 
+  isFavorite(filePath: string): boolean {
+    return this.data.files[filePath]?.favorite === true;
+  }
+
   setTags(filePath: string, tags: readonly string[], identity: FileIdentity): string[] {
     const normalized = normalizeTags(tags);
-    if (normalized.length === 0) {
+    const favorite = this.data.files[filePath]?.favorite === true;
+    if (normalized.length === 0 && !favorite) {
       delete this.data.files[filePath];
     } else {
-      this.data.files[filePath] = { tags: normalized, ...identityOf(identity) };
+      this.data.files[filePath] = withFavorite(
+        { tags: normalized, ...identityOf(identity) },
+        favorite,
+      );
     }
     this.save();
     return normalized;
+  }
+
+  setFavorite(filePath: string, favorite: boolean, identity: FileIdentity): boolean {
+    const tags = this.data.files[filePath]?.tags ?? [];
+    if (!favorite && tags.length === 0) {
+      delete this.data.files[filePath];
+      this.save();
+      return false;
+    }
+    this.data.files[filePath] = withFavorite(
+      { tags: [...tags], ...identityOf(identity) },
+      favorite,
+    );
+    this.save();
+    return favorite;
+  }
+
+  setColor(tag: string, color: TagColorId): void {
+    const key = tag.trim().replace(/\s+/g, " ").toLowerCase();
+    if (!key) throw new Error("Invalid tag color");
+    this.data.colors[key] = color;
+    this.save();
+  }
+
+  colors(): Record<string, string> {
+    return { ...this.data.colors };
   }
 
   noteIdentity(filePath: string, identity: FileIdentity): void {
@@ -178,7 +233,7 @@ export class TagIndex {
     for (const [key, entry] of Object.entries(this.data.files)) {
       const live = byPath.get(key);
       if (!live) continue;
-      next[key] = { tags: entry.tags, ...identityOf(live) };
+      next[key] = withFavorite({ tags: entry.tags, ...identityOf(live) }, entry.favorite === true);
       claimed.add(key);
     }
     const unclaimed = files.filter((file) => !claimed.has(file.path));
@@ -188,7 +243,10 @@ export class TagIndex {
       const matches = unclaimed.filter((file) => file.ino === entry.ino && file.dev === entry.dev);
       const match = matches.length === 1 ? matches[0] : undefined;
       if (!match || next[match.path]) continue;
-      next[match.path] = { tags: entry.tags, ...identityOf(match) };
+      next[match.path] = withFavorite(
+        { tags: entry.tags, ...identityOf(match) },
+        entry.favorite === true,
+      );
       const index = unclaimed.indexOf(match);
       if (index >= 0) unclaimed.splice(index, 1);
     }
@@ -218,7 +276,10 @@ export class TagIndex {
     const files = Object.fromEntries(
       Object.entries(this.data.files).sort(([a], [b]) => a.localeCompare(b)),
     );
-    const text = JSON.stringify({ version: 1, root: this.data.root, files }, null, 2);
+    const colors = Object.fromEntries(
+      Object.entries(this.data.colors).sort(([a], [b]) => a.localeCompare(b)),
+    );
+    const text = JSON.stringify({ version: 1, root: this.data.root, files, colors }, null, 2);
     if (text === this.savedText) return;
     this.savedText = text;
     writeAtomic(this.file, text);

@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type { MdApi } from "./shared/api";
 import { channels } from "./shared/channels";
 import type {
+  AppSettings,
   ExternalFileEvent,
   FilePayload,
   SessionInfo,
@@ -61,6 +62,19 @@ const api: MdApi = {
   listTags: () => ipcRenderer.invoke(channels.listTags) as Promise<TagCount[]>,
   filesForTag: (tag: string) =>
     ipcRenderer.invoke(channels.filesForTag, { tag }) as Promise<string[]>,
+  setFavorite: (filePath: string, favorite: boolean) =>
+    ipcRenderer.invoke(channels.setFavorite, { path: filePath, favorite }) as Promise<boolean>,
+  setTagColor: (tag: string, color: string) =>
+    ipcRenderer.invoke(channels.setTagColor, { tag, color }) as Promise<void>,
+  snippet: (filePath: string) =>
+    ipcRenderer.invoke(channels.snippet, { path: filePath }) as Promise<string>,
+  revealPath: (filePath: string) =>
+    ipcRenderer.invoke(channels.revealPath, { path: filePath }) as Promise<void>,
+  copyPath: (filePath: string) =>
+    ipcRenderer.invoke(channels.copyPath, { path: filePath }) as Promise<void>,
+  getSettings: () => ipcRenderer.invoke(channels.getSettings) as Promise<AppSettings>,
+  setWordGoal: (goal: number) =>
+    ipcRenderer.invoke(channels.setWordGoal, { goal }) as Promise<{ wordGoal: number }>,
   readAsset: (from: string, href: string) =>
     ipcRenderer.invoke(channels.readAsset, { from, href }) as Promise<string | null>,
   openExternal: (url: string) =>

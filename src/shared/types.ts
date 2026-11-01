@@ -5,15 +5,31 @@ export type TreeNode = {
   children?: TreeNode[];
 };
 
+export type CatalogFile = {
+  path: string;
+  name: string;
+  mtimeMs: number;
+  favorite: boolean;
+  tags: string[];
+};
+
 export type SessionInfo = {
   root: string;
   tree: TreeNode[];
+  catalog: CatalogFile[];
+  colors: Record<string, string>;
 };
 
 export type FilePayload = {
   content: string;
   mtimeMs: number;
   tags: string[];
+  favorite: boolean;
+};
+
+export type AppSettings = {
+  wordGoal: number;
+  platform: string;
 };
 
 export type TagCount = {

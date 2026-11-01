@@ -8,6 +8,7 @@ import {
   MAX_IMAGE_BYTES,
   MAX_MARKDOWN_BYTES,
 } from "./names";
+import { excerpt } from "./excerpt";
 import { portableRelative, resolveContained } from "./paths";
 import type { FileIdentity } from "./tags";
 
@@ -43,6 +44,18 @@ export function readMarkdown(
 ): { content: string; identity: FileIdentity } {
   const { abs, identity } = existingMarkdown(root, relInput);
   return { content: fs.readFileSync(abs, "utf8"), identity };
+}
+
+export function readExcerpt(root: string, relInput: string): string {
+  const { abs } = existingMarkdown(root, relInput);
+  const fd = fs.openSync(abs, "r");
+  try {
+    const buf = Buffer.alloc(4096);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    return excerpt(buf.toString("utf8", 0, n));
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 export function writeMarkdown(root: string, relInput: string, content: string): FileIdentity {

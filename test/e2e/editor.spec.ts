@@ -90,10 +90,8 @@ See [Monday](journal/monday.md).
     });
     await page.setViewportSize({ width: 1280, height: 800 });
 
-    await expect(page.locator('[data-testid="tree-file"][data-path="Welcome.md"]')).toBeVisible();
-    await expect(
-      page.locator('[data-testid="tree-file"][data-path="journal/monday.md"]'),
-    ).toBeVisible();
+    await expect(page.locator('[data-testid="doc"][data-path="Welcome.md"]')).toBeVisible();
+    await expect(page.locator('[data-testid="doc"][data-path="journal/monday.md"]')).toBeVisible();
     await expect(page.locator('[data-testid="tree-folder"][data-path="inbox"]')).toBeVisible();
     await expect(page.getByText("ignore.txt")).toHaveCount(0);
 
@@ -102,7 +100,9 @@ See [Monday](journal/monday.md).
     await expect(page.locator('[data-path="journal/monday.md"]')).toBeVisible();
     await page.getByTestId("search").fill("");
 
-    await page.locator('[data-testid="tree-file"][data-path="Welcome.md"]').click();
+    await page.locator('[data-testid="doc"][data-path="Welcome.md"]').click();
+    await page.getByTestId("more").click();
+    await page.getByTestId("mode-split").click();
     await expect(page.getByTestId("preview").locator("table")).toBeVisible();
     await expect(page.getByTestId("preview")).toContainText("Garden notes");
     await expect(page.getByTestId("preview").locator("img")).toHaveAttribute(
@@ -116,7 +116,7 @@ See [Monday](journal/monday.md).
     await page.getByTestId("preview").getByRole("link", { name: "Monday" }).click();
     await expect(page.getByTestId("preview")).toContainText("Rain in the morning");
 
-    await page.locator('[data-testid="tree-file"][data-path="Welcome.md"]').click();
+    await page.locator('[data-testid="doc"][data-path="Welcome.md"]').click();
     const editor = page.locator(".cm-content");
     await editor.click();
     await page.keyboard.press("Control+End");
@@ -128,26 +128,27 @@ See [Monday](journal/monday.md).
       "Tags stay with the file when it moves.",
     );
 
+    await page.getByTestId("add-tag").click();
     await page.getByTestId("tag-input").fill("garden");
     await page.getByTestId("tag-input").press("Enter");
     await expect(page.getByTestId("tag-chip")).toContainText("garden");
+    await page.keyboard.press("Escape");
+    await page.keyboard.press("Escape");
     await page.screenshot({ path: "docs/screenshots/split-view.png" });
 
-    await page.locator('[data-testid="tree-file"][data-path="journal/monday.md"]').click();
+    await page.locator('[data-testid="doc"][data-path="journal/monday.md"]').click();
+    await page.getByTestId("add-tag").click();
     await page.getByTestId("tag-input").fill("garden");
     await page.getByTestId("tag-input").press("Enter");
-    await page.getByTestId("tab-tags").click();
     await expect(page.locator('[data-testid="tag"][data-tag="garden"]')).toContainText("2");
     await page.locator('[data-testid="tag"][data-tag="garden"]').click();
-    await expect(page.locator('[data-testid="tag-file"][data-path="Welcome.md"]')).toBeVisible();
-    await expect(
-      page.locator('[data-testid="tag-file"][data-path="journal/monday.md"]'),
-    ).toBeVisible();
+    await expect(page.locator('[data-testid="doc"][data-path="Welcome.md"]')).toBeVisible();
+    await expect(page.locator('[data-testid="doc"][data-path="journal/monday.md"]')).toBeVisible();
     await page.screenshot({ path: "docs/screenshots/tag-view.png" });
 
     await page.locator(".cm-content").click();
     await page.keyboard.type(" draft");
-    await page.locator('[data-testid="tag-file"][data-path="Welcome.md"]').click();
+    await page.locator('[data-testid="doc"][data-path="Welcome.md"]').click();
     await expect(page.getByTestId("discard-dialog")).toBeVisible();
     await page.getByTestId("discard-confirm").click();
     await expect(page.getByTestId("preview")).toContainText("Tags stay with the file");

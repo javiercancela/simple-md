@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TAG_COLOR_IDS } from "../core/colors";
 import { normalizeRelative } from "../core/paths";
 
 function relativePath(value: string): boolean {
@@ -34,6 +35,20 @@ export const tagsSchema = z.object({
 
 export const tagQuerySchema = z.object({
   tag: z.string().min(1).max(80),
+});
+
+export const favoriteSchema = z.object({
+  path: relativePathSchema,
+  favorite: z.boolean(),
+});
+
+export const tagColorSchema = z.object({
+  tag: z.string().min(1).max(80),
+  color: z.enum(TAG_COLOR_IDS),
+});
+
+export const goalSchema = z.object({
+  goal: z.number().int().min(50).max(20_000),
 });
 
 export const assetSchema = z.object({
