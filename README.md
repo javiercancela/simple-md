@@ -17,7 +17,7 @@ npm start
 
 You can pass a folder path: `npm start -- /path/to/notes`.
 
-The sidebar lists Markdown files and any folder that contains one. Empty folders stay visible so a new folder shows up before its first file. Folders that contain only other file types are hidden. `.git` and `node_modules` are skipped.
+The sidebar lists Markdown files and any folder that contains one. Empty folders stay visible so a new folder shows up before its first file. Folders that contain only other file types are hidden. `.git` and `node_modules` are skipped. The folder is scanned in the background so a large folder does not freeze the window. Symlink cycles are skipped, and directories deeper than 40 levels are not walked.
 
 ### macOS
 

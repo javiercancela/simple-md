@@ -1,18 +1,27 @@
 import fs from "node:fs";
+import path from "node:path";
 import { isMarkdownPath } from "./names";
-import { isInsideRoot, realRoot, resolveContained } from "./paths";
+import { realRoot } from "./paths";
 import type { FileIdentity } from "./tags";
 import type { TreeNode } from "../shared/types";
 
 const SKIP = new Set([".git", "node_modules"]);
+const MAX_DEPTH = 40;
+const YIELD_EVERY = 200;
 
 function compareNodes(a: TreeNode, b: TreeNode): number {
   if (a.kind !== b.kind) return a.kind === "folder" ? -1 : 1;
   return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
 }
 
-function fileIdentity(rel: string, abs: string): FileIdentity {
-  const stat = fs.statSync(abs, { bigint: true });
+function contained(rootReal: string, candidateReal: string): boolean {
+  const relative = path.relative(rootReal, candidateReal);
+  if (relative === "") return true;
+  if (path.isAbsolute(relative)) return false;
+  return relative !== ".." && !relative.startsWith(`..${path.sep}`);
+}
+
+function identityOf(rel: string, stat: fs.BigIntStats): FileIdentity {
   return {
     path: rel,
     ino: stat.ino.toString(),
@@ -22,57 +31,90 @@ function fileIdentity(rel: string, abs: string): FileIdentity {
   };
 }
 
-export function scanRoot(rootInput: string): { tree: TreeNode[]; files: FileIdentity[] } {
+async function breathe(progress: { n: number }): Promise<void> {
+  progress.n += 1;
+  if (progress.n % YIELD_EVERY === 0) {
+    await new Promise((resolve) => {
+      setImmediate(resolve);
+    });
+  }
+}
+
+type Walk = { nodes: TreeNode[]; vacant: boolean };
+
+export async function scanRoot(
+  rootInput: string,
+): Promise<{ tree: TreeNode[]; files: FileIdentity[] }> {
   const root = realRoot(rootInput);
   const files: FileIdentity[] = [];
   const seen = new Set<string>();
+  const progress = { n: 0 };
 
-  const walk = (logicalRel: string): TreeNode[] => {
-    const abs = logicalRel === "" ? root : resolveContained(root, logicalRel);
-    const real = fs.realpathSync(abs);
-    if (!isInsideRoot(root, real) || seen.has(real)) return [];
-    seen.add(real);
+  const walk = async (logicalRel: string, dirReal: string, depth: number): Promise<Walk> => {
+    if (depth > MAX_DEPTH || seen.has(dirReal) || !contained(root, dirReal)) {
+      return { nodes: [], vacant: false };
+    }
+    seen.add(dirReal);
     let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(real, { withFileTypes: true });
+      entries = fs.readdirSync(dirReal, { withFileTypes: true });
     } catch {
-      return [];
+      return { nodes: [], vacant: false };
     }
+    if (entries.length === 0) return { nodes: [], vacant: true };
     const nodes: TreeNode[] = [];
     for (const entry of entries) {
+      await breathe(progress);
       if (SKIP.has(entry.name)) continue;
       const childRel = logicalRel ? `${logicalRel}/${entry.name}` : entry.name;
-      let childAbs: string;
-      try {
-        childAbs = resolveContained(root, childRel);
-      } catch {
-        continue;
-      }
-      let stat: fs.Stats;
-      try {
-        stat = fs.statSync(childAbs);
-      } catch {
-        continue;
-      }
-      if (stat.isDirectory()) {
-        const children = walk(childRel);
-        let empty = false;
+      const childPath = path.join(dirReal, entry.name);
+      if (entry.isSymbolicLink()) {
+        let target: string;
         try {
-          empty = fs.readdirSync(childAbs).length === 0;
+          target = fs.realpathSync(childPath);
         } catch {
-          empty = false;
+          continue;
         }
-        if (children.length > 0 || empty) {
-          nodes.push({ name: entry.name, path: childRel, kind: "folder", children });
+        if (!contained(root, target)) continue;
+        let stat: fs.BigIntStats;
+        try {
+          stat = fs.statSync(target, { bigint: true });
+        } catch {
+          continue;
         }
-      } else if (stat.isFile() && isMarkdownPath(entry.name)) {
-        nodes.push({ name: entry.name, path: childRel, kind: "file" });
-        files.push(fileIdentity(childRel, childAbs));
+        if (stat.isDirectory()) {
+          if (seen.has(target)) continue;
+          const child = await walk(childRel, target, depth + 1);
+          if (child.nodes.length > 0 || child.vacant) {
+            nodes.push({ name: entry.name, path: childRel, kind: "folder", children: child.nodes });
+          }
+        } else if (stat.isFile() && isMarkdownPath(entry.name)) {
+          nodes.push({ name: entry.name, path: childRel, kind: "file" });
+          files.push(identityOf(childRel, stat));
+        }
+        continue;
+      }
+      if (entry.isDirectory()) {
+        const child = await walk(childRel, childPath, depth + 1);
+        if (child.nodes.length > 0 || child.vacant) {
+          nodes.push({ name: entry.name, path: childRel, kind: "folder", children: child.nodes });
+        }
+        continue;
+      }
+      if (entry.isFile() && isMarkdownPath(entry.name)) {
+        try {
+          const stat = fs.statSync(childPath, { bigint: true });
+          nodes.push({ name: entry.name, path: childRel, kind: "file" });
+          files.push(identityOf(childRel, stat));
+        } catch {
+          continue;
+        }
       }
     }
     nodes.sort(compareNodes);
-    return nodes;
+    return { nodes, vacant: false };
   };
 
-  return { tree: walk(""), files };
+  const walked = await walk("", root, 0);
+  return { tree: walked.nodes, files };
 }

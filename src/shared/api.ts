@@ -19,6 +19,7 @@ export type MdApi = {
   openExternal: (url: string) => Promise<void>;
   watchFile: (path: string) => Promise<void>;
   unwatch: () => Promise<void>;
+  ready: () => Promise<void>;
   confirmClose: () => Promise<void>;
   cancelClose: () => Promise<void>;
   onLibrary: (callback: (session: SessionInfo) => void) => () => void;

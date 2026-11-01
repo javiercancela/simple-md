@@ -40,9 +40,11 @@ function requireLibrary() {
 
 export function registerIpc(
   getWindow: () => BrowserWindow | null,
-  allowClose: WeakSet<BrowserWindow>,
-  setQuitAfterClose: (value: boolean) => void,
-  consumeQuitAfterClose: () => boolean,
+  actions: {
+    markReady: () => void;
+    confirmClose: () => void;
+    cancelClose: () => void;
+  },
 ): void {
   const handle = <T>(channel: string, schema: z.ZodType<T>, fn: (input: T) => unknown): void => {
     ipcMain.handle(channel, (event: IpcEvent, raw: unknown) => {
@@ -62,7 +64,7 @@ export function registerIpc(
     });
     const folder = picked.filePaths[0];
     if (picked.canceled || !folder) return null;
-    return openLibrary(folder, app.getPath("userData")).session();
+    return (await openLibrary(folder, app.getPath("userData"))).session();
   });
 
   handle(channels.readFile, pathSchema, ({ path }) => requireLibrary().read(path));
@@ -90,15 +92,13 @@ export function registerIpc(
     if (action.type !== "external") throw new Error("Invalid link");
     await shell.openExternal(action.url);
   });
+  handle(channels.ready, emptySchema, () => {
+    actions.markReady();
+  });
   handle(channels.cancelClose, emptySchema, () => {
-    setQuitAfterClose(false);
+    actions.cancelClose();
   });
   handle(channels.confirmClose, emptySchema, () => {
-    const win = getWindow();
-    if (!win) return;
-    const quit = consumeQuitAfterClose();
-    allowClose.add(win);
-    win.close();
-    if (quit) app.quit();
+    actions.confirmClose();
   });
 }

@@ -68,6 +68,7 @@ const api: MdApi = {
   watchFile: (filePath: string) =>
     ipcRenderer.invoke(channels.watchFile, { path: filePath }) as Promise<void>,
   unwatch: () => ipcRenderer.invoke(channels.unwatch) as Promise<void>,
+  ready: () => ipcRenderer.invoke(channels.ready) as Promise<void>,
   confirmClose: () => ipcRenderer.invoke(channels.confirmClose) as Promise<void>,
   cancelClose: () => ipcRenderer.invoke(channels.cancelClose) as Promise<void>,
   onLibrary: (callback) => listen<SessionInfo>(channels.libraryUpdated, callback),

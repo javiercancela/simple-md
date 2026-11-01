@@ -75,7 +75,7 @@ describe("resolveContained", () => {
 });
 
 describe("scanRoot", () => {
-  it("lists markdown files, empty folders, and skips other files and escaping symlinks", () => {
+  it("lists markdown files, empty folders, and skips other files and escaping symlinks", async () => {
     const parent = tempDir();
     const root = path.join(parent, "notes");
     const outside = path.join(parent, "outside");
@@ -94,7 +94,7 @@ describe("scanRoot", () => {
     fs.writeFileSync(path.join(outside, "secret.md"), "secret");
     linkTo(outside, path.join(root, "linked-out"), "dir");
 
-    const { tree, files } = scanRoot(root);
+    const { tree, files } = await scanRoot(root);
     const paths = files.map((file) => file.path).sort();
     expect(paths).toEqual(["Welcome.md", "journal/monday.md"]);
     expect(JSON.stringify(tree)).toContain("inbox");
@@ -102,10 +102,36 @@ describe("scanRoot", () => {
     expect(JSON.stringify(tree)).not.toContain("ignore.txt");
     expect(JSON.stringify(tree)).not.toContain("node_modules");
   });
+
+  it("stops on a symlink cycle and still lists the real files", async () => {
+    const root = tempDir();
+    fs.mkdirSync(path.join(root, "sub"));
+    fs.writeFileSync(path.join(root, "sub", "a.md"), "a");
+    linkTo(root, path.join(root, "sub", "loop"), "dir");
+    linkTo(path.join(root, "sub"), path.join(root, "again"), "dir");
+    const started = Date.now();
+    const scan = await scanRoot(root);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(scan.files).toHaveLength(1);
+    expect(scan.files[0]?.path.endsWith("a.md")).toBe(true);
+    expect(JSON.stringify(scan.tree).split("loop").length).toBeLessThan(3);
+  });
+
+  it("scans a few thousand files without hanging", async () => {
+    const root = tempDir();
+    for (let index = 0; index < 3000; index += 1) {
+      fs.writeFileSync(path.join(root, `n-${index}.md`), `# Note ${index}\n`);
+    }
+    const started = Date.now();
+    const scan = await scanRoot(root);
+    expect(Date.now() - started).toBeLessThan(20_000);
+    expect(scan.files).toHaveLength(3000);
+    expect(scan.files.some((file) => file.path === "n-42.md")).toBe(true);
+  }, 60_000);
 });
 
 describe("symlinked roots", () => {
-  it("opens a root reached through a symlink and still rejects a link that escapes", () => {
+  it("opens a root reached through a symlink and still rejects a link that escapes", async () => {
     const parent = tempDir();
     const realParent = path.join(parent, "private");
     const aliasParent = path.join(parent, "var");
@@ -129,16 +155,16 @@ describe("symlinked roots", () => {
     expect(() => readMarkdown(root, "escape.md")).toThrow(/escapes/);
     expect(() => readMarkdown(via, "escape.md")).toThrow(/escapes/);
     expect(() => writeMarkdown(via, "escape.md", "pwned")).toThrow(/escapes/);
-    expect(
-      scanRoot(root)
-        .files.map((file) => file.path)
-        .sort(),
-    ).toEqual(["Welcome.md", "link.md", "sub/a.md"]);
-    expect(
-      scanRoot(via)
-        .files.map((file) => file.path)
-        .sort(),
-    ).toEqual(["Welcome.md", "link.md", "sub/a.md"]);
+    expect((await scanRoot(root)).files.map((file) => file.path).sort()).toEqual([
+      "Welcome.md",
+      "link.md",
+      "sub/a.md",
+    ]);
+    expect((await scanRoot(via)).files.map((file) => file.path).sort()).toEqual([
+      "Welcome.md",
+      "link.md",
+      "sub/a.md",
+    ]);
     expect(fs.readFileSync(path.join(outside, "secret.md"), "utf8")).toBe("secret");
   });
 });
