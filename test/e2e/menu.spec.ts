@@ -122,7 +122,11 @@ test("quit exits, and a dirty buffer asks before the process exits", async () =>
       .catch(() => undefined);
     await expect.poll(() => exit.then((code) => code ?? 0), { timeout: 10000 }).toBe(0);
   } finally {
-    if (app.process().exitCode === null) await app.close();
+    try {
+      if (app.process().exitCode === null) await app.close();
+    } catch {
+      // Quit already ended the Electron process.
+    }
     fs.rmSync(path.dirname(root), { recursive: true, force: true });
     fs.rmSync(userData, { recursive: true, force: true });
   }

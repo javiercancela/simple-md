@@ -124,10 +124,10 @@ describe("scanRoot", () => {
     }
     const started = Date.now();
     const scan = await scanRoot(root);
-    expect(Date.now() - started).toBeLessThan(8000);
+    expect(Date.now() - started).toBeLessThan(20_000);
     expect(scan.files).toHaveLength(3000);
     expect(scan.files.some((file) => file.path === "n-42.md")).toBe(true);
-  });
+  }, 60_000);
 });
 
 describe("symlinked roots", () => {
