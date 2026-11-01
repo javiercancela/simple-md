@@ -35,7 +35,7 @@ export function getLibrary(): Library | null {
   return current;
 }
 
-export function openLibrary(rootInput: string, userData: string): Library {
+export async function openLibrary(rootInput: string, userData: string): Promise<Library> {
   const root = realRoot(rootInput);
   current?.close();
   const indexFile = path.join(
@@ -43,9 +43,11 @@ export function openLibrary(rootInput: string, userData: string): Library {
     "indexes",
     `${createHash("sha256").update(root).digest("hex")}.json`,
   );
-  current = new Library(root, indexFile);
-  writeLastRoot(userData, root);
-  return current;
+  const library = new Library(root, indexFile);
+  current = library;
+  await library.load();
+  if (current === library) writeLastRoot(userData, root);
+  return library;
 }
 
 export function closeLibrary(): void {
@@ -63,6 +65,9 @@ export class Library {
   private tree: TreeNode[] = [];
   private signature = "";
   private timer: NodeJS.Timeout | null = null;
+  private generation = 0;
+  private polling = false;
+  private ticks = 0;
   private paused = false;
   private watched: string | null = null;
   private baseline: { hash: string; missing: boolean } | null = null;
@@ -70,13 +75,19 @@ export class Library {
   constructor(root: string, indexFile: string) {
     this.root = root;
     this.tags = TagIndex.open(indexFile, root);
-    this.refresh(true);
+  }
+
+  async load(): Promise<void> {
+    const generation = this.generation;
+    await this.refresh(true);
+    if (generation !== this.generation) return;
     this.timer = setInterval(() => {
-      this.poll();
+      void this.poll();
     }, 1000);
   }
 
   close(): void {
+    this.generation += 1;
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
   }
@@ -100,17 +111,17 @@ export class Library {
     return { mtimeMs: identity.mtimeMs };
   }
 
-  createFile(rel: string): { path: string; tree: TreeNode[] } {
+  async createFile(rel: string): Promise<{ path: string; tree: TreeNode[] }> {
     const created = createMarkdown(this.root, rel);
-    return { path: created, tree: this.refresh(true) };
+    return { path: created, tree: await this.refresh(true) };
   }
 
-  createFolder(rel: string): { path: string; tree: TreeNode[] } {
+  async createFolder(rel: string): Promise<{ path: string; tree: TreeNode[] }> {
     const created = createFolder(this.root, rel);
-    return { path: created, tree: this.refresh(true) };
+    return { path: created, tree: await this.refresh(true) };
   }
 
-  rename(from: string, to: string): { from: string; to: string; tree: TreeNode[] } {
+  async rename(from: string, to: string): Promise<{ from: string; to: string; tree: TreeNode[] }> {
     const moved = renameInside(this.root, from, to);
     this.tags.rename(moved.from, moved.to);
     const watched = this.watched;
@@ -119,7 +130,7 @@ export class Library {
         watched === moved.from ? moved.to : `${moved.to}/${watched.slice(moved.from.length + 1)}`;
       this.watch(next);
     }
-    return { ...moved, tree: this.refresh(true) };
+    return { ...moved, tree: await this.refresh(true) };
   }
 
   async trash(rel: string): Promise<{ tree: TreeNode[] }> {
@@ -135,7 +146,7 @@ export class Library {
       ) {
         this.unwatch();
       }
-      return { tree: this.refresh(true) };
+      return { tree: await this.refresh(true) };
     } finally {
       this.paused = false;
     }
@@ -169,8 +180,10 @@ export class Library {
     this.baseline = null;
   }
 
-  private refresh(force: boolean): TreeNode[] {
-    const scan = scanRoot(this.root);
+  private async refresh(force: boolean): Promise<TreeNode[]> {
+    const generation = this.generation;
+    const scan = await scanRoot(this.root);
+    if (generation !== this.generation) return this.tree;
     const next = JSON.stringify(scan.tree);
     const changed = next !== this.signature;
     this.tree = scan.tree;
@@ -180,14 +193,20 @@ export class Library {
     return this.tree;
   }
 
-  private poll(): void {
-    if (this.paused) return;
+  private async poll(): Promise<void> {
+    if (this.paused || this.polling) return;
+    this.polling = true;
+    const generation = this.generation;
+    this.ticks += 1;
     try {
       if (!fs.existsSync(this.root)) return;
-      this.refresh(false);
+      if (this.ticks % 4 === 0) await this.refresh(false);
+      if (generation !== this.generation) return;
       this.pollFile();
     } catch {
       // A transient unreadable directory is retried on the next tick.
+    } finally {
+      this.polling = false;
     }
   }
 

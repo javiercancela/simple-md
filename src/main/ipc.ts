@@ -64,7 +64,7 @@ export function registerIpc(
     });
     const folder = picked.filePaths[0];
     if (picked.canceled || !folder) return null;
-    return openLibrary(folder, app.getPath("userData")).session();
+    return (await openLibrary(folder, app.getPath("userData"))).session();
   });
 
   handle(channels.readFile, pathSchema, ({ path }) => requireLibrary().read(path));

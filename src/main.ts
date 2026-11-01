@@ -46,7 +46,7 @@ function folderFromArgv(argv: string[]): string | null {
   return null;
 }
 
-function openInitialFolder(): void {
+async function openInitialFolder(): Promise<void> {
   const userData = app.getPath("userData");
   const fromArg = folderFromArgv(process.argv);
   const last = readLastRoot(userData);
@@ -63,7 +63,7 @@ function openInitialFolder(): void {
       : null);
   if (!candidate) return;
   try {
-    openLibrary(candidate, userData);
+    await openLibrary(candidate, userData);
   } catch {
     // Keep the empty state when the remembered folder is gone.
   }
@@ -202,7 +202,7 @@ function bootstrap(): void {
       },
     });
     createWindow();
-    openInitialFolder();
+    void openInitialFolder();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();
     });
