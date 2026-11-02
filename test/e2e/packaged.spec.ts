@@ -1,4 +1,4 @@
-import { removeTestDirectory } from "./helpers";
+import { removeTestDirectory, stopProcessTree } from "./helpers";
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -43,6 +43,7 @@ test("packaged resources start, preload connects, and preview worker/images load
       ["--no-sandbox", "--disable-gpu", "--remote-debugging-port=0", root],
       {
         env: { ...process.env, SIMPLE_MD_USER_DATA: path.join(temporary, "User data") },
+        detached: process.platform !== "win32",
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -88,11 +89,7 @@ test("packaged resources start, preload connects, and preview worker/images load
     ).toBe(true);
   } finally {
     await browser?.close();
-    if (child && child.exitCode === null && child.signalCode === null) {
-      const exited = new Promise<void>((resolve) => child!.once("exit", () => resolve()));
-      child.kill("SIGKILL");
-      await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, 5000))]);
-    }
+    await stopProcessTree(child);
     removeTestDirectory(temporary);
   }
 });

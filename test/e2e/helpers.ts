@@ -1,9 +1,9 @@
-import type { ChildProcess } from "node:child_process";
+import { execFileSync, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import type { ElectronApplication } from "playwright";
 
 export function removeTestDirectory(directory: string): void {
-  // Chromium subprocesses can finish cache writes just after the main process exits.
+  // Allow a short delay for the OS to release files after process-tree shutdown.
   fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
@@ -17,9 +17,23 @@ export async function stopElectron(app: ElectronApplication | undefined): Promis
     // Playwright releases its process handle after a successful native quit.
     return;
   }
-  if (child.exitCode !== null || child.signalCode !== null) return;
+  await stopProcessTree(child);
+}
+
+// Playwright launches Electron in a separate POSIX process group. Direct spawns
+// must use detached: true on POSIX so the whole Chromium tree can be stopped.
+export async function stopProcessTree(child: ChildProcess | undefined): Promise<void> {
+  if (!child?.pid || child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
-  child.kill("SIGKILL");
+  if (process.platform === "win32") {
+    execFileSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+      stdio: "ignore",
+      windowsHide: true,
+      timeout: 5000,
+    });
+  } else {
+    process.kill(-child.pid, "SIGKILL");
+  }
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
