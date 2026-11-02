@@ -232,7 +232,7 @@ export function Editor({
   text: Text;
   revision: number;
   focus: boolean;
-  onChange: (value: Text, words: number) => void;
+  onChange: (value: Text, words: number, documentId: number) => void;
   onSave: () => void;
   formatRef: { current: (kind: FormatKind) => void };
 }) {
@@ -285,14 +285,18 @@ export function Editor({
           EditorView.contentAttributes.of({ spellcheck: "true" }),
           EditorView.updateListener.of((update) => {
             if (update.docChanged)
-              onChangeRef.current(update.state.doc, update.state.field(editorWordCount));
+              onChangeRef.current(
+                update.state.doc,
+                update.state.field(editorWordCount),
+                documentId,
+              );
           }),
           chrome,
         ],
       }),
     });
     viewRef.current = view;
-    onChangeRef.current(view.state.doc, view.state.field(editorWordCount));
+    onChangeRef.current(view.state.doc, view.state.field(editorWordCount), documentId);
     return () => {
       view.destroy();
       viewRef.current = null;

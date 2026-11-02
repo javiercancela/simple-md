@@ -791,7 +791,9 @@ export function App() {
           setGoal(value);
           void window.md.setWordGoal(value).catch((reason) => setError(errorText(reason)));
         }}
-        onChange={(value, count) => {
+        onChange={(value, count, documentId) => {
+          // A previous editor can finish mounting after a new document/session is committed.
+          if (documentId !== documentIdRef.current) return;
           bufferRef.current = value;
           setBuffer(value);
           setWords(count);

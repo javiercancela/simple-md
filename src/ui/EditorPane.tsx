@@ -102,7 +102,7 @@ export function EditorPane({
   onFocus: () => void;
   onExitFocus: () => void;
   onGoal: (goal: number) => void;
-  onChange: (value: Text, words: number) => void;
+  onChange: (value: Text, words: number, documentId: number) => void;
   onSave: () => void;
   onNavigate: (href: string) => void;
   onRemoveTag: (tag: string) => void;

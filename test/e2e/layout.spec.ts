@@ -67,9 +67,10 @@ async function expectNoOverflow(page: Page) {
 test("collapsed macOS header clears native window controls", async () => {
   const { app, page, parent } = await setup();
   try {
-    // Also exercise the macOS CSS on CI platforms with a standard title bar.
-    await page.getByTestId("app").evaluate((el) => el.classList.add("platform-darwin"));
     await page.getByRole("button", { name: "Hide sidebar" }).click();
+    // Also exercise the macOS CSS on CI platforms with a standard title bar.
+    // Apply after the React update so it does not replace the simulated platform.
+    await page.getByTestId("app").evaluate((el) => el.classList.add("platform-darwin"));
     const toggle = page.getByRole("button", { name: "Show sidebar" });
     const box = await toggle.boundingBox();
     expect(box!.y).toBeGreaterThanOrEqual(40);

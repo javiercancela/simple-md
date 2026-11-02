@@ -122,6 +122,24 @@ test("snippets stay within their library when paths and timestamps match", async
   }
 });
 
+test("switching folders during editor initialization does not leave unsaved changes", async () => {
+  const { app, page, root, beta, parent } = await setup();
+  try {
+    for (let index = 0; index < 10; index++) {
+      const folder = index % 2 === 0 ? beta : root;
+      const name = path.basename(folder);
+      // Do not wait for the editor to mount before switching sessions.
+      await switchFolder(app, folder);
+      await expect(page.locator(".doc-excerpt")).toHaveText(`Snippet from ${name}`);
+      await expect(page.getByTestId("editor")).toHaveCount(0);
+      await expect(page.getByTestId("dialog")).toHaveCount(0);
+      await page.getByTestId("doc").click();
+    }
+  } finally {
+    await cleanup(app, parent);
+  }
+});
+
 test("an old library's delayed snippet cannot populate the new library", async () => {
   const { app, page, root, beta, parent } = await setup();
   try {
@@ -154,6 +172,7 @@ test("an old library's delayed snippet cannot populate the new library", async (
       .toBe(true);
     await switchFolder(app, beta);
     await expect(page.locator(".doc-excerpt")).toHaveText("Snippet from Beta");
+    await expect(page.getByTestId("dialog")).toHaveCount(0);
     await app.evaluate(() =>
       (globalThis as unknown as { releaseSnippet: () => void }).releaseSnippet(),
     );

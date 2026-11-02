@@ -98,6 +98,7 @@ test("menu commands create and save, and standard roles are present", async () =
 
     await page.locator('[data-testid="doc"][data-path="Welcome.md"]').click();
     const editor = page.locator(".cm-content");
+    await expect(editor).toHaveText("# Hi");
     await editor.click();
     await page.keyboard.press("Control+End");
     await page.keyboard.type("Saved from the menu.");
