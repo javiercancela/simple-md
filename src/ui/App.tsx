@@ -33,9 +33,10 @@ type DialogState =
   | { kind: "prompt"; title: string; label: string; value: string; confirm: string }
   | { kind: "confirm"; title: string; body: string; confirm: string };
 
-type DiskNotice = { kind: "changed"; content: string } | { kind: "removed" };
+type DiskNotice = { kind: "changed"; content: string; revision: string } | { kind: "removed" };
 
 type SessionState = {
+  id: string;
   root: string;
   rootName: string;
   tree: TreeNode[];
@@ -164,7 +165,8 @@ export function App() {
 
   const documentIdRef = useRef(0);
   const saveQueueRef = useRef(Promise.resolve());
-  const rootRef = useRef<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
+  const diskRevisionRef = useRef<string | null>(null);
   const filePathRef = useRef<string | null>(null);
   const bufferRef = useRef("");
   const savedRef = useRef("");
@@ -204,7 +206,14 @@ export function App() {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
-  function commitFile(rel: string | null, content: string, nextTags: string[], hash = ""): void {
+  function commitFile(
+    rel: string | null,
+    content: string,
+    nextTags: string[],
+    hash = "",
+    diskRevision: string | null = null,
+  ): void {
+    diskRevisionRef.current = diskRevision;
     documentIdRef.current += 1;
     filePathRef.current = rel;
     bufferRef.current = content;
@@ -224,9 +233,10 @@ export function App() {
   }
 
   function applySession(next: SessionInfo): void {
-    const changed = rootRef.current !== next.root;
-    rootRef.current = next.root;
+    const changed = sessionIdRef.current !== next.id;
+    sessionIdRef.current = next.id;
     setSession({
+      id: next.id,
       root: next.root,
       rootName: basename(next.root),
       tree: next.tree,
@@ -263,8 +273,31 @@ export function App() {
     const operation = saveQueueRef.current.then(async () => {
       if (documentIdRef.current !== documentId || filePathRef.current !== rel) return false;
       try {
-        await window.md.writeFile(rel, content);
+        let result = await window.md.writeFile(rel, content, diskRevisionRef.current);
+        while (result.status === "conflict") {
+          if (documentIdRef.current !== documentId || filePathRef.current !== rel) return false;
+          const expected = result.revision;
+          const overwrite = await openDialog({
+            kind: "confirm",
+            title: "File changed on disk",
+            body:
+              expected === null
+                ? "This file was removed on disk. Recreate it with your edits?"
+                : "This file changed on disk. Replace its contents with your edits?",
+            confirm: expected === null ? "Recreate" : "Overwrite",
+          });
+          if (
+            overwrite !== true ||
+            documentIdRef.current !== documentId ||
+            filePathRef.current !== rel
+          )
+            return false;
+          // Recheck the confirmed revision; another external edit needs consent again.
+          result = await window.md.writeFile(rel, content, expected);
+        }
         if (documentIdRef.current !== documentId || filePathRef.current !== rel) return false;
+        diskRevisionRef.current = result.revision;
+        setDiskNotice(null);
         savedRef.current = content;
         setSaved(content);
         setError(null);
@@ -306,7 +339,7 @@ export function App() {
   async function loadFile(rel: string, hash = ""): Promise<void> {
     const file = await window.md.readFile(rel);
     setPickerOpen(false);
-    commitFile(rel, file.content, file.tags, hash);
+    commitFile(rel, file.content, file.tags, hash, file.revision);
     setSelected(rel);
     setSelectedKind("file");
     setExpanded((current) => {
@@ -539,11 +572,11 @@ export function App() {
         contentChanged: true,
       });
       if (action === "reload") {
-        commitFile(event.path, event.content, fileTagsRef.current);
+        commitFile(event.path, event.content, fileTagsRef.current, "", event.revision);
         return;
       }
       if (action === "prompt-reload") {
-        setDiskNotice({ kind: "changed", content: event.content });
+        setDiskNotice({ kind: "changed", content: event.content, revision: event.revision! });
         return;
       }
       if (action === "removed") {
@@ -659,6 +692,7 @@ export function App() {
         onSelectFolder={onSelectFolder}
       />
       <DocColumn
+        key={session?.id ?? "empty"}
         title={session ? filterLabel(filter) : "All Documents"}
         countLabel={`${docs.length} ${docs.length === 1 ? "document" : "documents"}`}
         query={query}
@@ -693,6 +727,7 @@ export function App() {
         onShowSidebar={() => setSidebarOpen(true)}
       />
       <EditorPane
+        documentId={documentIdRef.current}
         sessionOpen={session !== null}
         filePath={filePath}
         folderLabel={folderName}
@@ -758,7 +793,7 @@ export function App() {
         onNewFolder={() => void newFolder()}
         onReload={() => {
           if (diskNotice?.kind === "changed" && filePath)
-            commitFile(filePath, diskNotice.content, fileTags);
+            commitFile(filePath, diskNotice.content, fileTags, "", diskNotice.revision);
         }}
         onCloseRemoved={() => {
           commitFile(null, "", []);

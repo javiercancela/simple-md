@@ -72,8 +72,8 @@ export function registerIpc(
   });
 
   handle(channels.readFile, pathSchema, ({ path }) => requireLibrary().read(path));
-  handle(channels.writeFile, writeFileSchema, ({ path, content }) =>
-    requireLibrary().write(path, content),
+  handle(channels.writeFile, writeFileSchema, ({ path, content, revision }) =>
+    requireLibrary().write(path, content, revision),
   );
   handle(channels.createFile, pathSchema, ({ path }) => requireLibrary().createFile(path));
   handle(channels.createFolder, pathSchema, ({ path }) => requireLibrary().createFolder(path));

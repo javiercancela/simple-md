@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { TagIndex, type FileIdentity } from "../../src/core/tags";
 
 const dirs: string[] = [];
@@ -24,6 +24,7 @@ function identity(root: string, rel: string): FileIdentity {
 }
 
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const dir of dirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
@@ -136,5 +137,62 @@ describe("TagIndex", () => {
     const replaced = TagIndex.open(indexFile, root);
     expect(replaced.listTags()).toEqual([]);
     expect(fs.existsSync(`${indexFile}.bak`)).toBe(true);
+  });
+});
+
+describe("bulk rename reconciliation", () => {
+  for (const count of [1000, 5000, 10000]) {
+    it(`preserves tags and favorites for ${count} renamed documents with one index write`, () => {
+      const root = tempDir();
+      const indexFile = path.join(root, "index.json");
+      const files = Object.fromEntries(
+        Array.from({ length: count }, (_, i) => [
+          `old/${i}.md`,
+          { tags: ["keep"], favorite: true, dev: "1", ino: String(i + 1), size: 10, mtimeMs: 1 },
+        ]),
+      );
+      fs.writeFileSync(indexFile, JSON.stringify({ version: 1, root, files, colors: {} }));
+      const index = TagIndex.open(indexFile, root);
+      const write = vi.spyOn(fs, "renameSync");
+      const started = performance.now();
+      index.reconcile(
+        Array.from({ length: count }, (_, i) => ({
+          path: `new/${i}.md`,
+          dev: "1",
+          ino: String(i + 1),
+          size: 10,
+          mtimeMs: 1,
+        })),
+      );
+      const elapsed = performance.now() - started;
+      console.info(`Reconcile ${count} renames: ${elapsed.toFixed(1)} ms`);
+      expect(write).toHaveBeenCalledTimes(1);
+      write.mockRestore();
+      const reopened = TagIndex.open(indexFile, root);
+      expect(reopened.filesForTag("keep")).toHaveLength(count);
+      for (let i = 0; i < count; i++) {
+        expect(reopened.tagsFor(`new/${i}.md`)).toEqual(["keep"]);
+        expect(reopened.isFavorite(`new/${i}.md`)).toBe(true);
+      }
+    });
+  }
+
+  it("drops ambiguous inode matches and only consumes an unambiguous hard-link match once", () => {
+    const root = tempDir();
+    const index = TagIndex.open(path.join(root, "index.json"), root);
+    const identity = { dev: "1", ino: "42", size: 1, mtimeMs: 1 };
+    index.setTags("old.md", ["keep"], { path: "old.md", ...identity });
+    index.setFavorite("old.md", true, { path: "old.md", ...identity });
+    index.reconcile([
+      { path: "a.md", ...identity },
+      { path: "b.md", ...identity },
+    ]);
+    expect(index.tagsFor("a.md")).toEqual([]);
+    expect(index.isFavorite("b.md")).toBe(false);
+    index.setTags("old-a.md", ["first"], { path: "old-a.md", ...identity });
+    index.setTags("old-b.md", ["second"], { path: "old-b.md", ...identity });
+    index.reconcile([{ path: "new.md", ...identity }]);
+    expect(index.tagsFor("new.md")).toEqual(["first"]);
+    expect(index.filesForTag("second")).toEqual([]);
   });
 });

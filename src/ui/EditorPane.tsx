@@ -37,6 +37,7 @@ export function EditorPane({
   html,
   hash,
   revision,
+  documentId,
   buffer,
   error,
   diskNotice,
@@ -85,6 +86,7 @@ export function EditorPane({
   html: string;
   hash: string;
   revision: number;
+  documentId: number;
   buffer: string;
   error: string | null;
   diskNotice: { kind: "changed"; content: string } | { kind: "removed" } | null;
@@ -404,9 +406,10 @@ export function EditorPane({
       ) : null}
 
       <div className={`stage panes-${mode}`}>
-        {filePath && showEditor ? (
+        {filePath ? (
           <Editor
-            path={filePath}
+            documentId={documentId}
+            hidden={!showEditor}
             text={buffer}
             revision={revision}
             focus={focus}

@@ -1,7 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
 import { isMarkdownPath } from "./names";
-import { realRoot } from "./paths";
 import type { FileIdentity } from "./tags";
 import type { TreeNode } from "../shared/types";
 
@@ -45,7 +44,8 @@ type Walk = { nodes: TreeNode[]; vacant: boolean };
 export async function scanRoot(
   rootInput: string,
 ): Promise<{ tree: TreeNode[]; files: FileIdentity[]; complete: boolean; failedPaths: string[] }> {
-  const root = realRoot(rootInput);
+  const root = await fs.promises.realpath(rootInput);
+  if (!(await fs.promises.stat(root)).isDirectory()) throw new Error("Not a folder");
   const files: FileIdentity[] = [];
   const failedPaths: string[] = [];
   const seen = new Set<string>();
@@ -59,7 +59,7 @@ export async function scanRoot(
     seen.add(dirReal);
     let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(dirReal, { withFileTypes: true });
+      entries = await fs.promises.readdir(dirReal, { withFileTypes: true });
     } catch {
       failedPaths.push(logicalRel);
       return { nodes: [], vacant: false };
@@ -74,7 +74,7 @@ export async function scanRoot(
       if (entry.isSymbolicLink()) {
         let target: string;
         try {
-          target = fs.realpathSync(childPath);
+          target = await fs.promises.realpath(childPath);
         } catch {
           failedPaths.push(childRel);
           continue;
@@ -82,7 +82,7 @@ export async function scanRoot(
         if (!contained(root, target)) continue;
         let stat: fs.BigIntStats;
         try {
-          stat = fs.statSync(target, { bigint: true });
+          stat = await fs.promises.stat(target, { bigint: true });
         } catch {
           failedPaths.push(childRel);
           continue;
@@ -108,7 +108,7 @@ export async function scanRoot(
       }
       if (entry.isFile() && isMarkdownPath(entry.name)) {
         try {
-          const stat = fs.statSync(childPath, { bigint: true });
+          const stat = await fs.promises.stat(childPath, { bigint: true });
           nodes.push({ name: entry.name, path: childRel, kind: "file" });
           files.push(identityOf(childRel, stat));
         } catch {

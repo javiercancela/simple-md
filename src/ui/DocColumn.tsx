@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { SnippetCache } from "./snippetCache";
 import { tagPaint } from "../core/colors";
 import type { CatalogFile } from "../shared/types";
 import type { DocSort } from "./docs";
@@ -44,7 +45,7 @@ export function DocColumn({
   onShowSidebar: () => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
-  const cache = useRef(new Map<string, string>());
+  const cache = useRef(new SnippetCache());
   const [tick, setTick] = useState(0);
   const [windowed, setWindowed] = useState({ start: 0, end: 20 });
   const sortLabel =
@@ -76,16 +77,16 @@ export function DocColumn({
 
   useEffect(() => {
     const slice = rows.slice(windowed.start, windowed.end);
-    const missing = slice.filter((row) => !cache.current.has(`${row.path}:${row.mtimeMs}`));
+    const missing = slice.filter((row) => cache.current.get(row.path, row.mtimeMs) === undefined);
     if (missing.length === 0) return;
     let cancelled = false;
     void Promise.all(
       missing.map(async (row) => {
         try {
           const text = await window.md.snippet(row.path);
-          cache.current.set(`${row.path}:${row.mtimeMs}`, text);
+          if (!cancelled) cache.current.set(row.path, row.mtimeMs, text);
         } catch {
-          cache.current.set(`${row.path}:${row.mtimeMs}`, "");
+          if (!cancelled) cache.current.set(row.path, row.mtimeMs, "");
         }
       }),
     ).then(() => {
@@ -243,7 +244,7 @@ export function DocColumn({
           <div style={{ paddingTop: start * ROW, paddingBottom: (rows.length - end) * ROW }}>
             {visible.map((row) => {
               const on = row.path === selected;
-              const snippet = cache.current.get(`${row.path}:${row.mtimeMs}`) ?? "";
+              const snippet = cache.current.get(row.path, row.mtimeMs) ?? "";
               return (
                 <div
                   key={row.path}

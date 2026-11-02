@@ -107,3 +107,18 @@ export function realRoot(input: string): string {
   if (!fs.statSync(real).isDirectory()) throw new Error("Not a folder");
   return real;
 }
+
+// Async counterpart for background reconciliation/polling. Resolve every parent
+// through realpath so a symlink cannot move a read outside the opened library.
+export async function resolveContainedAsync(root: string, relInput: string): Promise<string> {
+  const rootReal = await fs.promises.realpath(root);
+  const rel = normalizeRelative(relInput);
+  let current = rootReal;
+  for (const segment of rel.split("/")) {
+    current = await fs.promises.realpath(path.join(current, segment));
+    const relative = path.relative(rootReal, current);
+    if (path.isAbsolute(relative) || relative === ".." || relative.startsWith(`..${path.sep}`))
+      throw new Error("Path escapes the opened folder");
+  }
+  return current;
+}

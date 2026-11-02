@@ -236,19 +236,26 @@ export class TagIndex {
       next[key] = withFavorite({ tags: entry.tags, ...identityOf(live) }, entry.favorite === true);
       claimed.add(key);
     }
-    const unclaimed = files.filter((file) => !claimed.has(file.path));
+    const byIdentity = new Map<string, FileIdentity[]>();
+    for (const file of files) {
+      if (claimed.has(file.path)) continue;
+      const key = `${file.dev}:${file.ino}`;
+      const matches = byIdentity.get(key);
+      if (matches) matches.push(file);
+      else byIdentity.set(key, [file]);
+    }
     for (const [key, entry] of Object.entries(this.data.files)) {
       if (next[key]) continue;
       if (!entry.ino || entry.ino === "0") continue;
-      const matches = unclaimed.filter((file) => file.ino === entry.ino && file.dev === entry.dev);
-      const match = matches.length === 1 ? matches[0] : undefined;
+      const identityKey = `${entry.dev}:${entry.ino}`;
+      const matches = byIdentity.get(identityKey);
+      const match = matches?.length === 1 ? matches[0] : undefined;
       if (!match || next[match.path]) continue;
       next[match.path] = withFavorite(
         { tags: entry.tags, ...identityOf(match) },
         entry.favorite === true,
       );
-      const index = unclaimed.indexOf(match);
-      if (index >= 0) unclaimed.splice(index, 1);
+      byIdentity.delete(identityKey);
     }
     this.data.files = next;
     this.save();
@@ -281,7 +288,15 @@ export class TagIndex {
     );
     const text = JSON.stringify({ version: 1, root: this.data.root, files, colors }, null, 2);
     if (text === this.savedText) return;
-    this.savedText = text;
-    writeAtomic(this.file, text);
+    try {
+      writeAtomic(this.file, text);
+      this.savedText = text;
+    } catch (error) {
+      // Failed mutations are rolled back; identical retries must still persist.
+      this.data = this.savedText
+        ? parseIndex(this.savedText, this.data.root)
+        : empty(this.data.root);
+      throw error;
+    }
   }
 }

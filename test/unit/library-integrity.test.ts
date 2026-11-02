@@ -33,7 +33,7 @@ function refresh(library: Library) {
   return (library as unknown as { refresh(force: boolean): Promise<unknown> }).refresh(true);
 }
 function pollFile(library: Library) {
-  (library as unknown as { pollFile(): void }).pollFile();
+  return (library as unknown as { pollFile(): Promise<void> }).pollFile();
 }
 
 afterEach(() => {
@@ -51,9 +51,9 @@ describe("incomplete filesystem reads", () => {
       library.setTags("sub/a.md", ["keep"]);
       library.setFavorite("sub/a.md", true);
       const before = fs.readFileSync(indexFile, "utf8");
-      const method = operation === "directory" ? "readdirSync" : "statSync";
-      const original = fs[method];
-      const spy = vi.spyOn(fs, method).mockImplementation(((...args: unknown[]) => {
+      const method = operation === "directory" ? "readdir" : "stat";
+      const original = fs.promises[method];
+      const spy = vi.spyOn(fs.promises, method).mockImplementation((async (...args: unknown[]) => {
         if (
           String(args[0]) ===
           path.join(fs.realpathSync(root), operation === "directory" ? "sub" : "sub/a.md")
@@ -85,21 +85,35 @@ describe("incomplete filesystem reads", () => {
     library.read("sub/a.md");
     const file = vi.fn();
     setLibrarySink({ library() {}, file });
-    const original = fs.readFileSync;
-    const spy = vi.spyOn(fs, "readFileSync").mockImplementation(((...args: unknown[]) => {
+    const original = fs.promises.readFile;
+    const spy = vi.spyOn(fs.promises, "readFile").mockImplementation((async (
+      ...args: unknown[]
+    ) => {
       if (String(args[0]).endsWith("a.md"))
         throw Object.assign(new Error("unreadable"), { code: "EACCES" });
       return (original as (...args: unknown[]) => unknown)(...args);
     }) as typeof original);
-    pollFile(library);
+    await pollFile(library);
     expect(file).not.toHaveBeenCalled();
     spy.mockRestore();
     fs.writeFileSync(path.join(root, "sub/a.md"), "changed");
-    pollFile(library);
-    expect(file).toHaveBeenLastCalledWith({ path: "sub/a.md", exists: true, content: "changed" });
+    await pollFile(library);
+    expect(file).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        path: "sub/a.md",
+        exists: true,
+        content: "changed",
+        revision: expect.any(String),
+      }),
+    );
     fs.unlinkSync(path.join(root, "sub/a.md"));
-    pollFile(library);
-    expect(file).toHaveBeenLastCalledWith({ path: "sub/a.md", exists: false, content: "" });
+    await pollFile(library);
+    expect(file).toHaveBeenLastCalledWith({
+      path: "sub/a.md",
+      exists: false,
+      content: "",
+      revision: null,
+    });
   });
 });
 

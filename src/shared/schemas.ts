@@ -20,7 +20,12 @@ export const pathSchema = z.object({
 
 export const writeFileSchema = z.object({
   path: relativePathSchema,
-  content: z.string().max(8_000_000),
+  // The main-process write boundary enforces the UTF-8 byte limit.
+  content: z.string(),
+  revision: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .nullable(),
 });
 
 export const renameSchema = z.object({

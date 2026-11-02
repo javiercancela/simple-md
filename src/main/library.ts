@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { clipboard, shell } from "electron";
@@ -13,10 +13,18 @@ import {
   writeMarkdown,
 } from "../core/files";
 import { isColorId } from "../core/colors";
-import { realRoot } from "../core/paths";
+import { realRoot, resolveContainedAsync } from "../core/paths";
+import { MAX_MARKDOWN_BYTES } from "../core/names";
 import { scanRoot } from "../core/tree";
 import { TagIndex, type FileIdentity } from "../core/tags";
-import type { ExternalFileEvent, SessionInfo, TagCount, TreeNode } from "../shared/types";
+import type {
+  ExternalFileEvent,
+  FilePayload,
+  SessionInfo,
+  TagCount,
+  TreeNode,
+  WriteResult,
+} from "../shared/types";
 import { writeLastRoot } from "./settings";
 
 type Sink = {
@@ -57,11 +65,27 @@ export function closeLibrary(): void {
   current = null;
 }
 
-function hashContent(content: string): string {
-  return createHash("sha256").update(content).digest("hex");
+function diskRevision(content: string, identity: FileIdentity): string {
+  return createHash("sha256")
+    .update(`${identity.dev}:${identity.ino}:${identity.size}:${identity.mtimeMs}\0`)
+    .update(content)
+    .digest("hex");
 }
 
+function isMissing(error: unknown): boolean {
+  const cause = error instanceof Error && error.cause ? error.cause : error;
+  return (
+    !!cause &&
+    typeof cause === "object" &&
+    "code" in cause &&
+    (cause.code === "ENOENT" || cause.code === "ENOTDIR")
+  );
+}
+
+const FALLBACK_MS = 60_000;
+
 export class Library {
+  private readonly id = randomUUID();
   readonly root: string;
   private readonly tags: TagIndex;
   private tree: TreeNode[] = [];
@@ -71,11 +95,18 @@ export class Library {
   private fileSignature = "";
   private timer: NodeJS.Timeout | null = null;
   private generation = 0;
+  private refreshId = 0;
   private polling = false;
-  private ticks = 0;
+  private watcher: fs.FSWatcher | null = null;
+  private treeDirty = false;
+  private fileDirty = false;
+  private lastScan = 0;
+  private lastContentCheck = 0;
+  private fingerprint = "";
+  private suspended = false;
   private paused = false;
   private watched: string | null = null;
-  private baseline: { hash: string; missing: boolean } | null = null;
+  private baseline: { revision: string | null; missing: boolean } | null = null;
 
   constructor(root: string, indexFile: string) {
     this.root = root;
@@ -86,19 +117,57 @@ export class Library {
     const generation = this.generation;
     await this.refresh(true);
     if (generation !== this.generation) return;
-    this.timer = setInterval(() => {
-      void this.poll();
-    }, 1000);
+    this.startMonitoring();
   }
 
   close(): void {
     this.generation += 1;
+    this.stopMonitoring();
+  }
+
+  suspend(): void {
+    this.suspended = true;
+    this.generation += 1;
+    this.stopMonitoring();
+  }
+
+  resume(): void {
+    if (!this.suspended) return;
+    this.suspended = false;
+    this.treeDirty = true;
+    this.fileDirty = true;
+    this.startMonitoring();
+    void this.poll();
+  }
+
+  private startMonitoring(): void {
+    if (this.timer || this.suspended) return;
+    try {
+      this.watcher = fs.watch(this.root, { recursive: true }, () => {
+        this.treeDirty = true;
+        this.fileDirty = true;
+      });
+      this.watcher.on("error", () => {
+        this.watcher?.close();
+        this.watcher = null;
+        this.treeDirty = true;
+      });
+    } catch {
+      // Unsupported watchers/unavailable storage use bounded reconciliation.
+    }
+    this.timer = setInterval(() => void this.poll(), 1000);
+  }
+
+  private stopMonitoring(): void {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    this.watcher?.close();
+    this.watcher = null;
   }
 
   session(): SessionInfo {
     return {
+      id: this.id,
       root: this.root,
       tree: this.tree,
       catalog: this.files.map((file) => ({
@@ -112,11 +181,13 @@ export class Library {
     };
   }
 
-  read(rel: string): { content: string; mtimeMs: number; tags: string[]; favorite: boolean } {
+  read(rel: string): FilePayload {
     const { content, identity } = readMarkdown(this.root, rel);
     this.watched = identity.path;
-    this.baseline = { hash: hashContent(content), missing: false };
+    this.baseline = { revision: diskRevision(content, identity), missing: false };
+    this.fingerprint = "";
     return {
+      revision: this.baseline.revision!,
       content,
       mtimeMs: identity.mtimeMs,
       tags: this.tags.tagsFor(identity.path),
@@ -124,16 +195,31 @@ export class Library {
     };
   }
 
-  write(rel: string, content: string): { mtimeMs: number } {
+  write(rel: string, content: string, expectedRevision: string | null): WriteResult {
+    if (Buffer.byteLength(content, "utf8") > MAX_MARKDOWN_BYTES)
+      throw new Error("Markdown files are limited to 8 MB of UTF-8 text");
+    let revision: string | null = null;
+    try {
+      const current = readMarkdown(this.root, rel);
+      revision = diskRevision(current.content, current.identity);
+    } catch (error) {
+      if (!isMissing(error)) throw error;
+    }
+    if (revision !== expectedRevision) return { status: "conflict", revision };
+    // Best effort revision check immediately before atomic replacement. The OS
+    // offers no portable compare-and-swap against another process's rename.
     const identity = writeMarkdown(this.root, rel, content);
+    revision = diskRevision(content, identity);
     this.tags.noteIdentity(identity.path, identity);
     const index = this.files.findIndex((file) => file.path === identity.path);
     if (index >= 0) this.files[index] = identity;
     else this.files.push(identity);
-    if (this.watched === identity.path)
-      this.baseline = { hash: hashContent(content), missing: false };
+    if (this.watched === identity.path) {
+      this.baseline = { revision, missing: false };
+      this.fingerprint = "";
+    }
     this.publish();
-    return { mtimeMs: identity.mtimeMs };
+    return { status: "saved", mtimeMs: identity.mtimeMs, revision };
   }
 
   async createFile(rel: string): Promise<{ path: string; tree: TreeNode[] }> {
@@ -224,7 +310,8 @@ export class Library {
   watch(rel: string): void {
     const { content, identity } = readMarkdown(this.root, rel);
     this.watched = identity.path;
-    this.baseline = { hash: hashContent(content), missing: false };
+    this.baseline = { revision: diskRevision(content, identity), missing: false };
+    this.fingerprint = "";
   }
 
   unwatch(): void {
@@ -234,8 +321,18 @@ export class Library {
 
   private async refresh(force: boolean): Promise<TreeNode[]> {
     const generation = this.generation;
-    const scan = await scanRoot(this.root);
-    if (generation !== this.generation) return this.tree;
+    const refreshId = ++this.refreshId;
+    // Clear before awaiting so notifications arriving during a scan survive it.
+    this.treeDirty = false;
+    let scan: Awaited<ReturnType<typeof scanRoot>>;
+    try {
+      scan = await scanRoot(this.root);
+    } catch (error) {
+      this.treeDirty = true;
+      throw error;
+    }
+    if (generation !== this.generation || refreshId !== this.refreshId) return this.tree;
+    this.lastScan = Date.now();
     const next = JSON.stringify(scan.tree);
     const fileSig = scan.files
       .map((file) => `${file.path}\0${file.mtimeMs}\0${file.ino}`)
@@ -257,15 +354,13 @@ export class Library {
   }
 
   private async poll(): Promise<void> {
-    if (this.paused || this.polling) return;
+    if (this.suspended || this.paused || this.polling) return;
     this.polling = true;
     const generation = this.generation;
-    this.ticks += 1;
     try {
-      if (!fs.existsSync(this.root)) return;
-      if (this.ticks % 4 === 0) await this.refresh(false);
+      if (this.treeDirty || Date.now() - this.lastScan >= FALLBACK_MS) await this.refresh(false);
       if (generation !== this.generation) return;
-      this.pollFile();
+      await this.pollFile();
     } catch {
       // A transient unreadable directory is retried on the next tick.
     } finally {
@@ -273,32 +368,53 @@ export class Library {
     }
   }
 
-  private pollFile(): void {
-    if (!this.watched || !this.baseline) return;
-    let content: string | null = null;
+  private async pollFile(): Promise<void> {
+    const watched = this.watched;
+    const baseline = this.baseline;
+    if (!watched || !baseline) return;
+    const generation = this.generation;
+    const notified = this.fileDirty;
+    this.fileDirty = false;
+    let content: string;
+    let revision: string;
+    let fingerprint: string;
     try {
-      content = readMarkdown(this.root, this.watched).content;
-    } catch (error) {
-      // Only confirmed absence is removal; unreadable/oversized files are retried.
-      const cause = error instanceof Error && error.cause ? error.cause : error;
+      const abs = await resolveContainedAsync(this.root, watched);
+      const stat = await fs.promises.stat(abs, { bigint: true });
+      fingerprint = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
       if (
-        !cause ||
-        typeof cause !== "object" ||
-        !("code" in cause) ||
-        (cause.code !== "ENOENT" && cause.code !== "ENOTDIR")
+        !notified &&
+        fingerprint === this.fingerprint &&
+        Date.now() - this.lastContentCheck < FALLBACK_MS
       )
         return;
-      content = null;
-    }
-    if (content === null) {
-      if (this.baseline.missing) return;
-      this.baseline = { hash: "", missing: true };
-      sink.file({ path: this.watched, exists: false, content: "" });
+      if (!stat.isFile() || stat.size > BigInt(MAX_MARKDOWN_BYTES)) return;
+      content = await fs.promises.readFile(abs, "utf8");
+      revision = diskRevision(content, {
+        path: watched,
+        dev: String(stat.dev),
+        ino: String(stat.ino),
+        size: Number(stat.size),
+        mtimeMs: Number(stat.mtimeMs),
+      });
+    } catch (error) {
+      if (generation !== this.generation || this.baseline !== baseline) return;
+      // Read errors never imply deletion.
+      if (!isMissing(error)) {
+        this.fileDirty = true;
+        return;
+      }
+      if (baseline.missing) return;
+      this.baseline = { revision: null, missing: true };
+      this.fingerprint = "";
+      sink.file({ path: watched, exists: false, content: "", revision: null });
       return;
     }
-    const hash = hashContent(content);
-    if (!this.baseline.missing && hash === this.baseline.hash) return;
-    this.baseline = { hash, missing: false };
-    sink.file({ path: this.watched, exists: true, content });
+    if (generation !== this.generation || this.baseline !== baseline) return;
+    this.fingerprint = fingerprint;
+    this.lastContentCheck = Date.now();
+    if (!baseline.missing && revision === baseline.revision) return;
+    this.baseline = { revision, missing: false };
+    sink.file({ path: watched, exists: true, content, revision });
   }
 }

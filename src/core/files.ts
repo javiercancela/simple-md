@@ -34,7 +34,8 @@ function existingMarkdown(
   const abs = resolveContained(root, rel);
   const stat = fs.statSync(abs);
   if (!stat.isFile()) throw new Error("Not a Markdown file");
-  if (stat.size > MAX_MARKDOWN_BYTES) throw new Error("File is too large");
+  if (stat.size > MAX_MARKDOWN_BYTES)
+    throw new Error("Markdown files are limited to 8 MB of UTF-8 text");
   return { rel, abs, identity: statIdentity(rel, abs) };
 }
 
@@ -59,7 +60,8 @@ export function readExcerpt(root: string, relInput: string): string {
 }
 
 export function writeMarkdown(root: string, relInput: string, content: string): FileIdentity {
-  if (content.length > MAX_MARKDOWN_BYTES) throw new Error("File is too large");
+  if (Buffer.byteLength(content, "utf8") > MAX_MARKDOWN_BYTES)
+    throw new Error("Markdown files are limited to 8 MB of UTF-8 text");
   const rel = portableRelative(relInput);
   if (!isMarkdownPath(rel)) throw new Error("Only Markdown files can be saved");
   const abs = resolveContained(root, rel, { allowMissing: true });

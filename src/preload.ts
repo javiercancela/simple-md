@@ -8,6 +8,7 @@ import type {
   SessionInfo,
   TagCount,
   TreeNode,
+  WriteResult,
 } from "./shared/types";
 
 function listen<T>(channel: string, callback: (payload: T) => void): () => void {
@@ -35,10 +36,12 @@ const api: MdApi = {
   openFolder: () => ipcRenderer.invoke(channels.openFolder) as Promise<SessionInfo | null>,
   readFile: (filePath: string) =>
     ipcRenderer.invoke(channels.readFile, { path: filePath }) as Promise<FilePayload>,
-  writeFile: (filePath: string, content: string) =>
-    ipcRenderer.invoke(channels.writeFile, { path: filePath, content }) as Promise<{
-      mtimeMs: number;
-    }>,
+  writeFile: (filePath: string, content: string, revision: string | null) =>
+    ipcRenderer.invoke(channels.writeFile, {
+      path: filePath,
+      content,
+      revision,
+    }) as Promise<WriteResult>,
   createFile: (filePath: string) =>
     ipcRenderer.invoke(channels.createFile, { path: filePath }) as Promise<{
       path: string;

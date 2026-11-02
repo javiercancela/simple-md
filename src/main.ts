@@ -5,7 +5,7 @@ import started from "electron-squirrel-startup";
 import { realRoot } from "./core/paths";
 import { channels } from "./shared/channels";
 import { registerIpc } from "./main/ipc";
-import { closeLibrary, openLibrary, setLibrarySink } from "./main/library";
+import { closeLibrary, getLibrary, openLibrary, setLibrarySink } from "./main/library";
 import { readLastRoot } from "./main/settings";
 import { hardenContents, installSessionGuards } from "./main/security";
 
@@ -157,7 +157,10 @@ function createWindow(): BrowserWindow {
     if (!quitRequested) win.webContents.send(channels.requestClose);
   });
   win.on("closed", () => {
-    if (mainWindow === win) mainWindow = null;
+    if (mainWindow === win) {
+      mainWindow = null;
+      getLibrary()?.suspend();
+    }
   });
   win.once("ready-to-show", () => {
     win.show();
@@ -211,7 +214,10 @@ function bootstrap(): void {
     createWindow();
     void openInitialFolder();
     app.on("activate", () => {
-      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+      if (BrowserWindow.getAllWindows().length === 0) {
+        createWindow();
+        getLibrary()?.resume();
+      }
     });
   });
 

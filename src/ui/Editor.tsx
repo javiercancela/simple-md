@@ -217,7 +217,8 @@ const focusPlugin = ViewPlugin.fromClass(
 );
 
 export function Editor({
-  path,
+  documentId,
+  hidden,
   text,
   revision,
   focus,
@@ -225,7 +226,8 @@ export function Editor({
   onSave,
   formatRef,
 }: {
-  path: string;
+  documentId: number;
+  hidden: boolean;
   text: string;
   revision: number;
   focus: boolean;
@@ -291,7 +293,7 @@ export function Editor({
       view.destroy();
       viewRef.current = null;
     };
-  }, [path]);
+  }, [documentId]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -308,7 +310,18 @@ export function Editor({
     const current = view.state.doc.toString();
     if (current === next) return;
     view.dispatch({ changes: { from: 0, to: current.length, insert: next } });
-  }, [path, revision]);
+  }, [documentId, revision]);
 
-  return <div className="editor-host" data-testid="editor" ref={hostRef} />;
+  useEffect(() => {
+    if (!hidden) viewRef.current?.requestMeasure();
+  }, [hidden]);
+
+  return (
+    <div
+      className="editor-host"
+      data-testid="editor"
+      ref={hostRef}
+      style={{ display: hidden ? "none" : undefined }}
+    />
+  );
 }

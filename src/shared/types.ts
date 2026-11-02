@@ -14,6 +14,7 @@ export type CatalogFile = {
 };
 
 export type SessionInfo = {
+  id: string;
   root: string;
   tree: TreeNode[];
   catalog: CatalogFile[];
@@ -21,6 +22,7 @@ export type SessionInfo = {
 };
 
 export type FilePayload = {
+  revision: string;
   content: string;
   mtimeMs: number;
   tags: string[];
@@ -37,7 +39,12 @@ export type TagCount = {
   count: number;
 };
 
+export type WriteResult =
+  | { status: "saved"; mtimeMs: number; revision: string }
+  | { status: "conflict"; revision: string | null };
+
 export type ExternalFileEvent = {
+  revision: string | null;
   path: string;
   exists: boolean;
   content: string;

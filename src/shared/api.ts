@@ -1,10 +1,17 @@
-import type { AppSettings, ExternalFileEvent, FilePayload, SessionInfo, TagCount } from "./types";
+import type {
+  AppSettings,
+  ExternalFileEvent,
+  FilePayload,
+  SessionInfo,
+  TagCount,
+  WriteResult,
+} from "./types";
 
 export type MdApi = {
   getSession: () => Promise<SessionInfo | null>;
   openFolder: () => Promise<SessionInfo | null>;
   readFile: (path: string) => Promise<FilePayload>;
-  writeFile: (path: string, content: string) => Promise<{ mtimeMs: number }>;
+  writeFile: (path: string, content: string, revision: string | null) => Promise<WriteResult>;
   createFile: (path: string) => Promise<{ path: string; tree: SessionInfo["tree"] }>;
   createFolder: (path: string) => Promise<{ path: string; tree: SessionInfo["tree"] }>;
   renamePath: (
