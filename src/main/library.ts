@@ -18,6 +18,7 @@ import { MAX_MARKDOWN_BYTES } from "../core/names";
 import { scanRoot } from "../core/tree";
 import { TagIndex, type FileIdentity } from "../core/tags";
 import type {
+  AssetPayload,
   ExternalFileEvent,
   FilePayload,
   SessionInfo,
@@ -85,7 +86,7 @@ function isMissing(error: unknown): boolean {
 const FALLBACK_MS = 60_000;
 
 export class Library {
-  private readonly id = randomUUID();
+  readonly id = randomUUID();
   readonly root: string;
   private readonly tags: TagIndex;
   private tree: TreeNode[] = [];
@@ -303,8 +304,8 @@ export class Library {
     return this.tags.filesForTag(tag);
   }
 
-  readAsset(from: string, href: string): string | null {
-    return readImageDataUrl(this.root, from, href);
+  readAsset(from: string, href: string, revision?: string): Promise<AssetPayload | null> {
+    return readImageDataUrl(this.root, from, href, revision);
   }
 
   watch(rel: string): void {

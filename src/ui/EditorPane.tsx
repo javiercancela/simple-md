@@ -1,8 +1,10 @@
+import type { Text } from "@codemirror/state";
 import { useEffect, useState } from "react";
 import { tagPaint, type TagColorId } from "../core/colors";
 import type { ViewMode } from "../shared/types";
 import { Editor } from "./Editor";
 import type { FormatKind } from "./format";
+import { PreviewAssets } from "./previewAssets";
 import { Preview } from "./Preview";
 import { TagPicker } from "./TagPicker";
 
@@ -18,6 +20,8 @@ const FORMATS: { kind: FormatKind; label: string; glyph: string }[] = [
 
 export function EditorPane({
   sessionOpen,
+  sessionId,
+  mutationTarget,
   filePath,
   folderLabel,
   fileLabel,
@@ -67,6 +71,8 @@ export function EditorPane({
   onOpenFolder,
 }: {
   sessionOpen: boolean;
+  sessionId: string;
+  mutationTarget: { path: string; kind: "file" | "folder" } | null;
   filePath: string | null;
   folderLabel: string;
   fileLabel: string;
@@ -87,7 +93,7 @@ export function EditorPane({
   hash: string;
   revision: number;
   documentId: number;
-  buffer: string;
+  buffer: Text;
   error: string | null;
   diskNotice: { kind: "changed"; content: string } | { kind: "removed" } | null;
   pickerOpen: boolean;
@@ -96,7 +102,7 @@ export function EditorPane({
   onFocus: () => void;
   onExitFocus: () => void;
   onGoal: (goal: number) => void;
-  onChange: (value: string) => void;
+  onChange: (value: Text, words: number) => void;
   onSave: () => void;
   onNavigate: (href: string) => void;
   onRemoveTag: (tag: string) => void;
@@ -115,6 +121,17 @@ export function EditorPane({
   onDismissNotice: () => void;
   onOpenFolder: () => void;
 }) {
+  const [assetState, setAssetState] = useState<{ sessionId: string; cache: PreviewAssets } | null>(
+    null,
+  );
+  useEffect(() => {
+    const cache = new PreviewAssets((path, revision) =>
+      window.md.readAsset(sessionId, "document.md", `/${path}`, revision),
+    );
+    setAssetState({ sessionId, cache });
+    return () => cache.dispose();
+  }, [sessionId]);
+  const assets = assetState?.sessionId === sessionId ? assetState.cache : null;
   const [more, setMore] = useState(false);
   useEffect(() => {
     if (!more) return;
@@ -283,13 +300,15 @@ export function EditorPane({
                   type="button"
                   role="menuitem"
                   data-testid="rename"
-                  disabled={!sessionOpen}
+                  disabled={!mutationTarget}
                   onClick={() => {
                     setMore(false);
                     onRename();
                   }}
                 >
-                  Rename
+                  {mutationTarget
+                    ? `Rename ${mutationTarget.kind} “${mutationTarget.path}”`
+                    : "Rename"}
                 </button>
                 <button
                   type="button"
@@ -307,13 +326,15 @@ export function EditorPane({
                   type="button"
                   role="menuitem"
                   data-testid="delete"
-                  disabled={!sessionOpen}
+                  disabled={!mutationTarget}
                   onClick={() => {
                     setMore(false);
                     onTrash();
                   }}
                 >
-                  Move to trash
+                  {mutationTarget
+                    ? `Move ${mutationTarget.kind} “${mutationTarget.path}” to trash`
+                    : "Move to trash"}
                 </button>
               </div>
             ) : null}
@@ -418,8 +439,15 @@ export function EditorPane({
             formatRef={formatRef}
           />
         ) : null}
-        {filePath && showPreview ? (
-          <Preview html={html} fromRel={filePath} hash={hash} onNavigate={onNavigate} />
+        {filePath && showPreview && assets ? (
+          <Preview
+            key={sessionId}
+            assets={assets}
+            html={html}
+            fromRel={filePath}
+            hash={hash}
+            onNavigate={onNavigate}
+          />
         ) : null}
         {!filePath ? (
           <div className="empty" data-testid="empty">

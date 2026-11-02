@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { tagPaint } from "../core/colors";
 import type { TreeNode } from "../shared/types";
 import type { LibraryFilter } from "./docs";
@@ -65,6 +66,7 @@ export function Sidebar({
   onOpenFolder: () => void;
   onSelectFolder: (node: TreeNode) => void;
 }) {
+  const folders = useMemo(() => folderTree(tree), [tree]);
   if (!open) return null;
   return (
     <nav className="sidebar" data-testid="sidebar" aria-label="Sidebar">
@@ -128,7 +130,7 @@ export function Sidebar({
           <div className="side-label">Folders</div>
           <div data-testid="tree">
             <FileTree
-              nodes={folderTree(tree)}
+              nodes={folders}
               depth={0}
               expanded={expanded}
               selected={filter.type === "folder" ? selected : null}

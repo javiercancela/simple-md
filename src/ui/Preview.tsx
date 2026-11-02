@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { PreviewAssets } from "./previewAssets";
 
 function elementId(hash: string): string {
   return window.CSS?.escape ? window.CSS.escape(hash) : hash.replace(/[^a-zA-Z0-9_-]/g, "");
@@ -6,11 +7,13 @@ function elementId(hash: string): string {
 
 export function Preview({
   html,
+  assets,
   fromRel,
   hash,
   onNavigate,
 }: {
   html: string;
+  assets: PreviewAssets;
   fromRel: string;
   hash: string;
   onNavigate: (href: string) => void;
@@ -26,14 +29,14 @@ export function Preview({
     for (const image of root.querySelectorAll("img[data-local-path]")) {
       const href = image.getAttribute("data-local-path");
       if (!href) continue;
-      void window.md.readAsset(fromRel, href).then((url) => {
+      void assets.read(fromRel, href).then((url) => {
         if (!cancelled && url && image.isConnected) image.setAttribute("src", url);
       });
     }
     return () => {
       cancelled = true;
     };
-  }, [html, fromRel]);
+  }, [html, fromRel, assets]);
 
   useEffect(() => {
     const root = ref.current;

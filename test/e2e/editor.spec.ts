@@ -1,3 +1,4 @@
+import { stopElectron } from "./helpers";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -157,7 +158,7 @@ See [Monday](journal/monday.md).
     fs.writeFileSync(welcome, `${fs.readFileSync(welcome, "utf8")}\nExternal note.\n`);
     await expect(page.getByTestId("preview")).toContainText("External note.");
   } finally {
-    await app?.close();
+    await stopElectron(app);
     fs.rmSync(parent, { recursive: true, force: true });
     fs.rmSync(userData, { recursive: true, force: true });
   }

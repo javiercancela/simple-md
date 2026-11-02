@@ -1,3 +1,4 @@
+import { stopElectron } from "./helpers";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -28,13 +29,10 @@ async function setup() {
 }
 
 async function cleanup(app: ElectronApplication, parent: string) {
-  if (app.process().exitCode === null && app.process().signalCode === null) {
-    const exited = new Promise<void>((resolve) => app.process().once("exit", () => resolve()));
-    app.process().kill("SIGKILL");
-    await exited;
-  }
+  await stopElectron(app);
   fs.rmSync(parent, { recursive: true, force: true });
 }
+
 async function menu(app: ElectronApplication, id: string) {
   await app.evaluate(({ Menu }, itemId) => {
     const item = Menu.getApplicationMenu()?.getMenuItemById(itemId);

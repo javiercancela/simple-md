@@ -188,7 +188,7 @@ describe("links and images", () => {
     expect(classifyHref("Welcome.md", "#week")).toEqual({ type: "scroll", id: "week" });
   });
 
-  it("reads an image inside the folder and refuses one outside it", () => {
+  it("reads an image inside the folder and refuses one outside it", async () => {
     const parent = tempDir();
     const root = path.join(parent, "notes");
     const outside = path.join(parent, "outside");
@@ -199,11 +199,11 @@ describe("links and images", () => {
     fs.writeFileSync(path.join(outside, "secret.png"), png);
     linkTo(path.join(outside, "secret.png"), path.join(root, "assets", "escape.png"), "file");
 
-    expect(readImageDataUrl(root, "Welcome.md", "assets/leaf.png")).toMatch(
-      /^data:image\/png;base64,/,
+    expect(await readImageDataUrl(root, "Welcome.md", "assets/leaf.png")).toEqual(
+      expect.objectContaining({ url: expect.stringMatching(/^data:image\/png;base64,/) }),
     );
-    expect(readImageDataUrl(root, "Welcome.md", "../outside/secret.png")).toBeNull();
-    expect(readImageDataUrl(root, "Welcome.md", "assets/escape.png")).toBeNull();
-    expect(readImageDataUrl(root, "Welcome.md", "https://example.com/a.png")).toBeNull();
+    expect(await readImageDataUrl(root, "Welcome.md", "../outside/secret.png")).toBeNull();
+    expect(await readImageDataUrl(root, "Welcome.md", "assets/escape.png")).toBeNull();
+    expect(await readImageDataUrl(root, "Welcome.md", "https://example.com/a.png")).toBeNull();
   });
 });

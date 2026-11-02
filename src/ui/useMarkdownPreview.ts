@@ -1,14 +1,15 @@
+import type { Text } from "@codemirror/state";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 // Bound both worker parsing and the HTML inserted into the renderer DOM.
 export const MAX_PREVIEW_BYTES = 1_000_000;
 
-export function useMarkdownPreview(source: string, visible: boolean, revision: number): string {
+export function useMarkdownPreview(source: Text, visible: boolean, revision: number): string {
   const withinLimit = useMemo(
     () =>
       !visible ||
       (source.length <= MAX_PREVIEW_BYTES &&
-        new TextEncoder().encode(source).length <= MAX_PREVIEW_BYTES),
+        new TextEncoder().encode(source.toString()).length <= MAX_PREVIEW_BYTES),
     [source, visible],
   );
   const [html, setHtml] = useState("");
@@ -65,7 +66,7 @@ export function useMarkdownPreview(source: string, visible: boolean, revision: n
         );
         return;
       }
-      const request = { id, source };
+      const request = { id, source: source.toString() };
       if (busyRef.current) pendingRef.current = request;
       else {
         busyRef.current = true;

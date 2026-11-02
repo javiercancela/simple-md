@@ -1,5 +1,6 @@
 import type {
   AppSettings,
+  AssetPayload,
   ExternalFileEvent,
   FilePayload,
   SessionInfo,
@@ -29,7 +30,12 @@ export type MdApi = {
   copyPath: (path: string) => Promise<void>;
   getSettings: () => Promise<AppSettings>;
   setWordGoal: (goal: number) => Promise<{ wordGoal: number }>;
-  readAsset: (from: string, href: string) => Promise<string | null>;
+  readAsset: (
+    sessionId: string,
+    from: string,
+    href: string,
+    revision?: string,
+  ) => Promise<AssetPayload | null>;
   openExternal: (url: string) => Promise<void>;
   watchFile: (path: string) => Promise<void>;
   unwatch: () => Promise<void>;

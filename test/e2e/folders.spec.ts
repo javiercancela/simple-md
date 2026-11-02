@@ -1,3 +1,4 @@
+import { stopElectron } from "./helpers";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -61,7 +62,7 @@ test("switching folders shows the new tree and does not keep the previous tags",
     await expect(page.getByTestId("tag-chip")).toHaveCount(0);
     await expect(page.getByTestId("tag")).toHaveCount(0);
   } finally {
-    if (app.process().exitCode === null) await app.close();
+    await stopElectron(app);
     fs.rmSync(parent, { recursive: true, force: true });
     fs.rmSync(userData, { recursive: true, force: true });
   }
@@ -100,7 +101,7 @@ test("opening another folder asks before discarding a dirty file and stays respo
     await expect(page.getByTestId("preview")).toContainText("Note 42", { timeout: 10_000 });
     await expect(page.locator('[data-testid="doc"][data-path="Welcome.md"]')).toHaveCount(0);
   } finally {
-    if (app.process().exitCode === null) await app.close();
+    await stopElectron(app);
     fs.rmSync(parent, { recursive: true, force: true });
     fs.rmSync(userData, { recursive: true, force: true });
   }

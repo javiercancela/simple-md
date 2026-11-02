@@ -1,3 +1,4 @@
+import { stopElectron } from "./helpers";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -25,16 +26,23 @@ async function launch(root: string, userData: string): Promise<ElectronApplicati
 
 async function clickMenu(app: ElectronApplication, id: string): Promise<void> {
   await app.evaluate(({ Menu }, menuId) => {
-    const item = Menu.getApplicationMenu()?.getMenuItemById(menuId);
+    const menu = Menu.getApplicationMenu();
+    const byRole = (items: Electron.MenuItem[]): Electron.MenuItem | undefined => {
+      for (const item of items) {
+        if (item.role === menuId) return item;
+        const nested = item.submenu && byRole(item.submenu.items);
+        if (nested) return nested;
+      }
+      return undefined;
+    };
+    const item = menu?.getMenuItemById(menuId) ?? (menu && byRole(menu.items));
     if (!item) throw new Error(`Missing menu item ${menuId}`);
-    item.click();
+    // Native macOS roles have no JavaScript click handler. Exercise AppKit's
+    // action, as documented by Menu.sendActionToFirstResponder.
+    if (process.platform === "darwin" && item.role === "quit")
+      Menu.sendActionToFirstResponder("terminate:");
+    else item.click();
   }, id);
-}
-
-function exited(app: ElectronApplication): Promise<number | null> {
-  return new Promise((resolve) => {
-    app.process().once("exit", (code) => resolve(code));
-  });
 }
 
 async function setup(): Promise<{ root: string; userData: string; welcome: string }> {
@@ -97,7 +105,7 @@ test("menu commands create and save, and standard roles are present", async () =
     await expect(page.getByTestId("dirty")).toHaveCount(0);
     expect(fs.readFileSync(welcome, "utf8")).toContain("Saved from the menu.");
   } finally {
-    if (app.process().exitCode === null) await app.close();
+    await stopElectron(app);
     fs.rmSync(path.dirname(root), { recursive: true, force: true });
     fs.rmSync(userData, { recursive: true, force: true });
   }
@@ -106,6 +114,7 @@ test("menu commands create and save, and standard roles are present", async () =
 test("quit exits, and a dirty buffer asks before the process exits", async () => {
   const { root, userData } = await setup();
   const app = await launch(root, userData);
+  const child = app.process();
   try {
     const page = await app.firstWindow();
     await page.locator('[data-testid="doc"][data-path="Welcome.md"]').click();
@@ -113,17 +122,16 @@ test("quit exits, and a dirty buffer asks before the process exits", async () =>
     await page.keyboard.type("not saved");
     await expect(page.getByTestId("dirty")).toBeVisible();
 
-    const exit = exited(app);
     await clickMenu(app, "quit");
     await expect(page.getByTestId("discard-dialog")).toBeVisible();
     await page
       .getByTestId("discard-confirm")
       .click({ noWaitAfter: true })
       .catch(() => undefined);
-    await expect.poll(() => exit.then((code) => code ?? 0), { timeout: 10000 }).toBe(0);
+    await expect.poll(() => child.exitCode, { timeout: 10000 }).toBe(0);
   } finally {
     try {
-      if (app.process().exitCode === null) await app.close();
+      await stopElectron(app);
     } catch {
       // Quit already ended the Electron process.
     }
@@ -135,9 +143,15 @@ test("quit exits, and a dirty buffer asks before the process exits", async () =>
 test("quit with a clean window exits the process", async () => {
   const { root, userData } = await setup();
   const app = await launch(root, userData);
-  const page = await app.firstWindow();
-  await page.locator('[data-testid="doc"][data-path="Welcome.md"]').waitFor();
-  const exit = exited(app);
-  await clickMenu(app, "quit");
-  await expect.poll(() => exit.then((code) => code ?? 0), { timeout: 10000 }).toBe(0);
+  const child = app.process();
+  try {
+    const page = await app.firstWindow();
+    await page.locator('[data-testid="doc"][data-path="Welcome.md"]').waitFor();
+    await clickMenu(app, "quit");
+    await expect.poll(() => child.exitCode, { timeout: 10000 }).toBe(0);
+  } finally {
+    await stopElectron(app);
+    fs.rmSync(path.dirname(root), { recursive: true, force: true });
+    fs.rmSync(userData, { recursive: true, force: true });
+  }
 });

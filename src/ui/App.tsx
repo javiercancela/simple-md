@@ -1,3 +1,4 @@
+import { Text } from "@codemirror/state";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { decideExternalChange } from "../core/external";
 import { classifyHref } from "../core/links";
@@ -19,7 +20,6 @@ import {
   readMinutes,
   tagCounts,
   visibleDocs,
-  wordCount,
   type DocSort,
   type LibraryFilter,
 } from "./docs";
@@ -146,6 +146,7 @@ export function App() {
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>({ type: "all" });
   const [sort, setSort] = useState<DocSort>("edited");
+  const [now, setNow] = useState(Date.now);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [focus, setFocus] = useState(false);
@@ -153,8 +154,9 @@ export function App() {
   const [goal, setGoal] = useState(500);
   const [platform, setPlatform] = useState(detectPlatform);
   const [filePath, setFilePath] = useState<string | null>(null);
-  const [buffer, setBuffer] = useState("");
-  const [saved, setSaved] = useState("");
+  const [buffer, setBuffer] = useState(Text.empty);
+  const [saved, setSaved] = useState(Text.empty);
+  const [words, setWords] = useState(0);
   const [fileTags, setFileTags] = useState<string[]>([]);
   const [revision, setRevision] = useState(0);
   const [pendingHash, setPendingHash] = useState("");
@@ -168,8 +170,9 @@ export function App() {
   const sessionIdRef = useRef<string | null>(null);
   const diskRevisionRef = useRef<string | null>(null);
   const filePathRef = useRef<string | null>(null);
-  const bufferRef = useRef("");
-  const savedRef = useRef("");
+  const bufferRef = useRef(Text.empty);
+  const savedRef = useRef(Text.empty);
+  const savedSourceRef = useRef("");
   const fileTagsRef = useRef<string[]>([]);
   const dialogRef = useRef<DialogState | null>(null);
   const resolver = useRef<(value: unknown) => void>(() => {});
@@ -188,19 +191,32 @@ export function App() {
 
   const osDark = usePrefersDark();
   const dark = focus || osDark;
-  const dirty = filePath !== null && buffer !== saved;
+  const dirty = filePath !== null && !buffer.eq(saved);
   const html = useMarkdownPreview(buffer, !!filePath && !focus && mode !== "editor", revision);
   const catalog = session?.catalog ?? [];
   const docs = useMemo(
-    () => visibleDocs(catalog, filter, query, sort),
-    [catalog, filter, query, sort],
+    () => visibleDocs(catalog, filter, query, sort, now),
+    [catalog, filter, query, sort, now],
   );
   const tags = useMemo(() => tagCounts(catalog), [catalog]);
   const counts = useMemo(() => folderCounts(catalog), [catalog]);
-  const words = useMemo(() => wordCount(filePath ? buffer : ""), [buffer, filePath]);
-  const openFile = catalog.find((file) => file.path === filePath);
+  const openFile = useMemo(
+    () => catalog.find((file) => file.path === filePath),
+    [catalog, filePath],
+  );
+  const recentCount = useMemo(
+    () => catalog.filter((file) => isRecent(file.mtimeMs, now)).length,
+    [catalog, now],
+  );
+  const favoriteCount = useMemo(() => catalog.filter((file) => file.favorite).length, [catalog]);
   const goalPct = Math.min(100, Math.round((words / Math.max(goal, 1)) * 100));
   const shortcutMod = modLabel(platform);
+
+  useEffect(() => {
+    // Recent membership changes with time even in a completely idle library.
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", dark);
@@ -216,12 +232,15 @@ export function App() {
     diskRevisionRef.current = diskRevision;
     documentIdRef.current += 1;
     filePathRef.current = rel;
-    bufferRef.current = content;
-    savedRef.current = content;
+    const doc = Text.of(content.split(/\r\n?|\n/));
+    bufferRef.current = doc;
+    savedRef.current = doc;
+    savedSourceRef.current = content;
     fileTagsRef.current = nextTags;
     setFilePath(rel);
-    setBuffer(content);
-    setSaved(content);
+    setBuffer(doc);
+    setSaved(doc);
+    if (!rel) setWords(0);
     setFileTags(nextTags);
     setRevision((value) => value + 1);
     setPendingHash(hash);
@@ -269,11 +288,13 @@ export function App() {
     if (!rel) return true;
     const documentId = documentIdRef.current;
     const content = bufferRef.current;
+    // Preserve original line endings when saving an unchanged document.
+    const source = content.eq(savedRef.current) ? savedSourceRef.current : content.toString();
     // Keep writes ordered, and never send a queued write into a different session.
     const operation = saveQueueRef.current.then(async () => {
       if (documentIdRef.current !== documentId || filePathRef.current !== rel) return false;
       try {
-        let result = await window.md.writeFile(rel, content, diskRevisionRef.current);
+        let result = await window.md.writeFile(rel, source, diskRevisionRef.current);
         while (result.status === "conflict") {
           if (documentIdRef.current !== documentId || filePathRef.current !== rel) return false;
           const expected = result.revision;
@@ -293,15 +314,16 @@ export function App() {
           )
             return false;
           // Recheck the confirmed revision; another external edit needs consent again.
-          result = await window.md.writeFile(rel, content, expected);
+          result = await window.md.writeFile(rel, source, expected);
         }
         if (documentIdRef.current !== documentId || filePathRef.current !== rel) return false;
         diskRevisionRef.current = result.revision;
         setDiskNotice(null);
         savedRef.current = content;
+        savedSourceRef.current = source;
         setSaved(content);
         setError(null);
-        return bufferRef.current === content;
+        return bufferRef.current.eq(content);
       } catch (reason) {
         if (documentIdRef.current === documentId) setError(errorText(reason));
         return false;
@@ -329,7 +351,7 @@ export function App() {
   }
 
   async function ensureCanLeave(): Promise<boolean> {
-    if (bufferRef.current === savedRef.current) return true;
+    if (bufferRef.current.eq(savedRef.current)) return true;
     const choice = await openDialog({ kind: "discard" });
     if (choice !== "save" && choice !== "discard") return false;
     if (choice === "save") return save();
@@ -458,7 +480,7 @@ export function App() {
     if (!selected) return;
     const open = filePathRef.current;
     const affects = open === selected || (open !== null && open.startsWith(`${selected}/`));
-    const losingEdits = affects && bufferRef.current !== savedRef.current;
+    const losingEdits = affects && !bufferRef.current.eq(savedRef.current);
     const body = losingEdits
       ? `Move “${selected}” to the trash? Unsaved changes will be lost.`
       : `Move “${selected}” to the trash?`;
@@ -567,7 +589,7 @@ export function App() {
     external: (event) => {
       if (event.path !== filePathRef.current) return;
       const action = decideExternalChange({
-        dirty: bufferRef.current !== savedRef.current,
+        dirty: !bufferRef.current.eq(savedRef.current),
         exists: event.exists,
         contentChanged: true,
       });
@@ -649,9 +671,6 @@ export function App() {
     };
   }, []);
 
-  const now = Date.now();
-  const recentCount = catalog.filter((file) => isRecent(file.mtimeMs, now)).length;
-  const favoriteCount = catalog.filter((file) => file.favorite).length;
   const rootName = session?.rootName ?? "";
   const parent = filePath ? parentPath(filePath) : "";
   const folderName = !filePath ? "" : parent ? (parent.split("/").pop() ?? parent) : rootName;
@@ -728,6 +747,8 @@ export function App() {
       />
       <EditorPane
         documentId={documentIdRef.current}
+        sessionId={session?.id ?? ""}
+        mutationTarget={selected ? { path: selected, kind: selectedKind ?? "file" } : null}
         sessionOpen={session !== null}
         filePath={filePath}
         folderLabel={folderName}
@@ -763,9 +784,10 @@ export function App() {
           setGoal(value);
           void window.md.setWordGoal(value).catch((reason) => setError(errorText(reason)));
         }}
-        onChange={(value) => {
+        onChange={(value, count) => {
           bufferRef.current = value;
           setBuffer(value);
+          setWords(count);
         }}
         onSave={() => void save()}
         onNavigate={onNavigate}

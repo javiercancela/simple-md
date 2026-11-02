@@ -6,7 +6,7 @@ import {
   syntaxHighlighting,
   syntaxTree,
 } from "@codemirror/language";
-import { Compartment, EditorState, RangeSetBuilder } from "@codemirror/state";
+import { Compartment, EditorState, RangeSetBuilder, type Text } from "@codemirror/state";
 import {
   Decoration,
   EditorView,
@@ -18,6 +18,7 @@ import {
 } from "@codemirror/view";
 import { tags as highlightTags } from "@lezer/highlight";
 import { useEffect, useRef } from "react";
+import { editorWordCount } from "./editorStats";
 import { applyFormat, type FormatKind } from "./format";
 
 const markdownLook = HighlightStyle.define([
@@ -136,7 +137,7 @@ function addClass(classes: Map<number, string[]>, pos: number, name: string): vo
   classes.set(pos, list);
 }
 
-function lineDecorations(view: EditorView): DecorationSet {
+export function lineDecorations(view: Pick<EditorView, "state" | "visibleRanges">): DecorationSet {
   const classes = new Map<number, string[]>();
   const { doc } = view.state;
   for (const range of view.visibleRanges) {
@@ -147,8 +148,8 @@ function lineDecorations(view: EditorView): DecorationSet {
         const name =
           node.name === "Blockquote" ? "cm-quote" : node.name === "FencedCode" ? "cm-fence" : "";
         if (!name) return;
-        const start = doc.lineAt(node.from).number;
-        const end = doc.lineAt(Math.max(node.from, node.to - 1)).number;
+        const start = doc.lineAt(Math.max(node.from, range.from)).number;
+        const end = doc.lineAt(Math.min(Math.max(node.from, node.to - 1), range.to)).number;
         for (let number = start; number <= end; number += 1) {
           addClass(classes, doc.line(number).from, name);
         }
@@ -228,10 +229,10 @@ export function Editor({
 }: {
   documentId: number;
   hidden: boolean;
-  text: string;
+  text: Text;
   revision: number;
   focus: boolean;
-  onChange: (value: string) => void;
+  onChange: (value: Text, words: number) => void;
   onSave: () => void;
   formatRef: { current: (kind: FormatKind) => void };
 }) {
@@ -260,6 +261,7 @@ export function Editor({
         doc: textRef.current,
         extensions: [
           history(),
+          editorWordCount,
           bracketMatching(),
           markdown({ base: markdownLanguage }),
           syntaxHighlighting(markdownLook),
@@ -282,13 +284,15 @@ export function Editor({
           EditorView.lineWrapping,
           EditorView.contentAttributes.of({ spellcheck: "true" }),
           EditorView.updateListener.of((update) => {
-            if (update.docChanged) onChangeRef.current(update.state.doc.toString());
+            if (update.docChanged)
+              onChangeRef.current(update.state.doc, update.state.field(editorWordCount));
           }),
           chrome,
         ],
       }),
     });
     viewRef.current = view;
+    onChangeRef.current(view.state.doc, view.state.field(editorWordCount));
     return () => {
       view.destroy();
       viewRef.current = null;
@@ -307,8 +311,8 @@ export function Editor({
     const view = viewRef.current;
     if (!view) return;
     const next = textRef.current;
-    const current = view.state.doc.toString();
-    if (current === next) return;
+    const current = view.state.doc;
+    if (current.eq(next)) return;
     view.dispatch({ changes: { from: 0, to: current.length, insert: next } });
   }, [documentId, revision]);
 

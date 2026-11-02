@@ -9,7 +9,8 @@ import {
   MAX_MARKDOWN_BYTES,
 } from "./names";
 import { excerpt } from "./excerpt";
-import { portableRelative, resolveContained } from "./paths";
+import { portableRelative, resolveContained, resolveContainedAsync } from "./paths";
+import type { AssetPayload } from "../shared/types";
 import type { FileIdentity } from "./tags";
 
 export type { FileIdentity };
@@ -134,18 +135,43 @@ export function renameInside(
   return { from, to, isDirectory };
 }
 
-export function readImageDataUrl(root: string, fromRel: string, href: string): string | null {
+// A matching revision avoids both the disk read/base64 allocation and the IPC payload.
+export async function readImageDataUrl(
+  root: string,
+  fromRel: string,
+  href: string,
+  knownRevision?: string,
+): Promise<AssetPayload | null> {
   try {
     const from = portableRelative(fromRel);
     const rel = resolveRelativeLink(from, href);
     if (!rel) return null;
     const mime = imageMime(rel);
     if (!mime) return null;
-    const abs = resolveContained(root, rel);
-    const stat = fs.statSync(abs);
-    if (!stat.isFile() || stat.size > MAX_IMAGE_BYTES || stat.size === 0) return null;
-    const bytes = fs.readFileSync(abs);
-    return `data:${mime};base64,${bytes.toString("base64")}`;
+    const abs = await resolveContainedAsync(root, rel);
+    const file = await fs.promises.open(abs, "r");
+    try {
+      const stat = await file.stat({ bigint: true });
+      if (!stat.isFile() || stat.size > BigInt(MAX_IMAGE_BYTES) || stat.size === 0n) return null;
+      const revision = `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+      if (revision === knownRevision) return { revision, url: null };
+      // A bounded read also handles a file growing between stat and read.
+      const bytes = Buffer.alloc(Number(stat.size) + 1);
+      const { bytesRead } = await file.read(bytes, 0, bytes.length, 0);
+      const after = await file.stat({ bigint: true });
+      if (
+        bytesRead !== Number(stat.size) ||
+        after.mtimeNs !== stat.mtimeNs ||
+        after.ctimeNs !== stat.ctimeNs
+      )
+        return null;
+      return {
+        revision,
+        url: `data:${mime};base64,${bytes.subarray(0, bytesRead).toString("base64")}`,
+      };
+    } finally {
+      await file.close();
+    }
   } catch {
     return null;
   }

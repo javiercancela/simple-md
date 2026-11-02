@@ -51,3 +51,5 @@ export type ExternalFileEvent = {
 };
 
 export type ViewMode = "editor" | "split" | "preview";
+
+export type AssetPayload = { revision: string; url: string | null };

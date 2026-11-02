@@ -3,6 +3,7 @@ import type { MdApi } from "./shared/api";
 import { channels } from "./shared/channels";
 import type {
   AppSettings,
+  AssetPayload,
   ExternalFileEvent,
   FilePayload,
   SessionInfo,
@@ -78,8 +79,13 @@ const api: MdApi = {
   getSettings: () => ipcRenderer.invoke(channels.getSettings) as Promise<AppSettings>,
   setWordGoal: (goal: number) =>
     ipcRenderer.invoke(channels.setWordGoal, { goal }) as Promise<{ wordGoal: number }>,
-  readAsset: (from: string, href: string) =>
-    ipcRenderer.invoke(channels.readAsset, { from, href }) as Promise<string | null>,
+  readAsset: (sessionId, from, href, revision) =>
+    ipcRenderer.invoke(channels.readAsset, {
+      sessionId,
+      from,
+      href,
+      revision,
+    }) as Promise<AssetPayload | null>,
   openExternal: (url: string) =>
     ipcRenderer.invoke(channels.openExternal, { url }) as Promise<void>,
   watchFile: (filePath: string) =>

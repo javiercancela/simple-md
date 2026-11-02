@@ -102,9 +102,11 @@ export function registerIpc(
   handle(channels.setWordGoal, goalSchema, ({ goal }) => ({
     wordGoal: writeWordGoal(app.getPath("userData"), goal),
   }));
-  handle(channels.readAsset, assetSchema, ({ from, href }) =>
-    requireLibrary().readAsset(from, href),
-  );
+  handle(channels.readAsset, assetSchema, ({ sessionId, from, href, revision }) => {
+    const library = requireLibrary();
+    if (library.id !== sessionId) return null;
+    return library.readAsset(from, href, revision);
+  });
   handle(channels.watchFile, watchSchema, ({ path }) => {
     requireLibrary().watch(path);
   });

@@ -57,6 +57,8 @@ export const goalSchema = z.object({
 });
 
 export const assetSchema = z.object({
+  sessionId: z.string().uuid(),
+  revision: z.string().max(256).optional(),
   from: relativePathSchema,
   href: z.string().min(1).max(4096),
 });

@@ -1,3 +1,4 @@
+import { stopElectron } from "./helpers";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -74,7 +75,7 @@ test("tag picker assigns and removes a tag from the keyboard", async () => {
     await page.getByTestId("tag-input").press("Enter");
     await expect(page.getByTestId("tag-chip")).toHaveCount(0);
   } finally {
-    if (app.process().exitCode === null) await app.close();
+    await stopElectron(app);
     fs.rmSync(path.dirname(root), { recursive: true, force: true });
     fs.rmSync(userData, { recursive: true, force: true });
   }
@@ -115,7 +116,7 @@ test("search by #tag, favorites, and focus mode", async () => {
     await expect(page.locator("html")).toHaveClass(/dark/);
     await page.screenshot({ path: "docs/screenshots/library-dark.png" });
   } finally {
-    if (app.process().exitCode === null) await app.close();
+    await stopElectron(app);
     fs.rmSync(path.dirname(root), { recursive: true, force: true });
     fs.rmSync(userData, { recursive: true, force: true });
   }
