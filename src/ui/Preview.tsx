@@ -23,6 +23,23 @@ export function Preview({
   onNavigateRef.current = onNavigate;
 
   useEffect(() => {
+    const content = ref.current?.querySelector<HTMLElement>(".preview-content");
+    if (!content) return;
+    const fitTables = () => {
+      for (const table of content.querySelectorAll("table")) {
+        // Let native auto layout preserve words first. Only permit character
+        // breaks when the table's minimum word widths cannot fit the pane.
+        table.classList.remove("is-constrained");
+        table.classList.toggle("is-constrained", table.offsetWidth > content.clientWidth);
+      }
+    };
+    fitTables();
+    const observer = new ResizeObserver(fitTables);
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [html]);
+
+  useEffect(() => {
     const root = ref.current;
     if (!root) return;
     let cancelled = false;
@@ -59,7 +76,8 @@ export function Preview({
         const href = anchor.getAttribute("href");
         if (href) onNavigateRef.current(href);
       }}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    >
+      <div className="preview-content" dangerouslySetInnerHTML={{ __html: html }} />
+    </div>
   );
 }

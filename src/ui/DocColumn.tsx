@@ -6,6 +6,8 @@ import type { DocSort } from "./docs";
 import { shortWhen } from "./docs";
 
 const ROW = 112;
+const MIN_WIDTH = 220;
+const DEFAULT_WIDTH = 300;
 
 export function DocColumn({
   title,
@@ -44,6 +46,10 @@ export function DocColumn({
   sidebarHidden: boolean;
   onShowSidebar: () => void;
 }) {
+  const column = useRef<HTMLElement>(null);
+  const drag = useRef<{ x: number; width: number } | null>(null);
+  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const [maxWidth, setMaxWidth] = useState(600);
   const scroller = useRef<HTMLDivElement>(null);
   const cache = useRef(new SnippetCache());
   const [tick, setTick] = useState(0);
@@ -56,6 +62,26 @@ export function DocColumn({
         : sort === "edited-asc"
           ? "Sort by date modified, oldest first"
           : "Sort by date modified";
+
+  useEffect(() => {
+    const el = column.current;
+    const shell = el?.parentElement;
+    if (!el || !shell) return;
+    const measure = () => {
+      const left = el.getBoundingClientRect().left - shell.getBoundingClientRect().left;
+      setMaxWidth(Math.max(MIN_WIDTH, Math.min(600, shell.clientWidth - left - 320)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(shell);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [sidebarHidden]);
+
+  const panelWidth = Math.min(width, maxWidth);
+  function resize(next: number): void {
+    setWidth(Math.max(MIN_WIDTH, Math.min(maxWidth, next)));
+  }
 
   useEffect(() => {
     const el = scroller.current;
@@ -122,7 +148,13 @@ export function DocColumn({
   const visible = rows.slice(start, end);
 
   return (
-    <section className="doc-col" aria-label="Documents">
+    <section
+      className="doc-col"
+      id="documents-panel"
+      ref={column}
+      style={{ flexBasis: panelWidth }}
+      aria-label="Documents"
+    >
       <div className="doc-head drag-region">
         {sidebarHidden ? (
           <button
@@ -305,6 +337,46 @@ export function DocColumn({
           </div>
         )}
       </div>
+      <div
+        className="panel-resizer"
+        role="separator"
+        aria-label="Resize files panel"
+        aria-controls="documents-panel"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_WIDTH}
+        aria-valuemax={maxWidth}
+        aria-valuenow={Math.round(panelWidth)}
+        tabIndex={0}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          event.preventDefault();
+          drag.current = { x: event.clientX, width: panelWidth };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          if (drag.current) resize(drag.current.width + event.clientX - drag.current.x);
+        }}
+        onPointerUp={(event) => {
+          drag.current = null;
+          if (event.currentTarget.hasPointerCapture(event.pointerId))
+            event.currentTarget.releasePointerCapture(event.pointerId);
+        }}
+        onLostPointerCapture={() => {
+          drag.current = null;
+        }}
+        onDoubleClick={() => resize(DEFAULT_WIDTH)}
+        onKeyDown={(event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+          event.preventDefault();
+          resize(
+            event.key === "Home"
+              ? MIN_WIDTH
+              : event.key === "End"
+                ? maxWidth
+                : panelWidth + (event.key === "ArrowRight" ? 20 : -20),
+          );
+        }}
+      />
     </section>
   );
 }
