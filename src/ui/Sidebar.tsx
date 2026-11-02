@@ -24,6 +24,7 @@ export function Sidebar({
   platform,
   filter,
   tree,
+  showAllFolders,
   expanded,
   selected,
   counts,
@@ -42,11 +43,13 @@ export function Sidebar({
   onAddTag,
   onOpenFolder,
   onSelectFolder,
+  onShowAllFolders,
 }: {
   open: boolean;
   platform: string;
   filter: LibraryFilter;
   tree: readonly TreeNode[];
+  showAllFolders: boolean;
   expanded: ReadonlySet<string>;
   selected: string | null;
   counts: ReadonlyMap<string, number>;
@@ -65,8 +68,9 @@ export function Sidebar({
   onAddTag: () => void;
   onOpenFolder: () => void;
   onSelectFolder: (node: TreeNode) => void;
+  onShowAllFolders: (show: boolean) => void;
 }) {
-  const folders = useMemo(() => folderTree(tree), [tree]);
+  const folders = useMemo(() => folderTree(tree, showAllFolders), [tree, showAllFolders]);
   if (!open) return null;
   return (
     <nav className="sidebar" data-testid="sidebar" aria-label="Sidebar">
@@ -128,6 +132,14 @@ export function Sidebar({
         </div>
         <div className="side-group">
           <div className="side-label">Folders</div>
+          <label className="folder-toggle">
+            <input
+              type="checkbox"
+              checked={showAllFolders}
+              onChange={(event) => onShowAllFolders(event.target.checked)}
+            />
+            Show all folders
+          </label>
           <div data-testid="tree">
             <FileTree
               nodes={folders}

@@ -221,6 +221,20 @@ input::placeholder {
   padding-bottom: 3px;
 }
 
+.folder-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.folder-toggle input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
 .nav-btn,
 .tag-btn,
 .tree-item,
@@ -883,10 +897,9 @@ kbd {
 }
 
 .preview {
-  max-width: 792px;
-  margin: 0 auto;
   padding: 8px 28px 48px;
   overflow: auto;
+  overflow-wrap: anywhere;
   color: var(--editor-text);
   font-family: var(--mono);
   font-size: 15.5px;
@@ -915,6 +928,7 @@ kbd {
 }
 
 .preview table {
+  max-width: 100%;
   border-collapse: collapse;
   margin: 12px 0;
 }
@@ -933,6 +947,7 @@ kbd {
 .preview pre {
   padding: 12px 16px;
   overflow: auto;
+  overflow-wrap: normal;
   border: 1px solid var(--code-border);
   border-radius: 10px;
   background: var(--code-bg);

@@ -148,6 +148,7 @@ export function App() {
   const [sort, setSort] = useState<DocSort>("edited");
   const [now, setNow] = useState(Date.now);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showAllFolders, setShowAllFolders] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [focus, setFocus] = useState(false);
   const [mode, setMode] = useState<ViewMode>("editor");
@@ -429,6 +430,7 @@ export function App() {
     try {
       const created = await window.md.createFolder(value.trim());
       adoptTree(created.tree);
+      setShowAllFolders(true);
       setSelected(created.path);
       setSelectedKind("folder");
       setFilter({ type: "folder", path: created.path });
@@ -685,6 +687,7 @@ export function App() {
         platform={platform}
         filter={filter}
         tree={session?.tree ?? []}
+        showAllFolders={showAllFolders}
         expanded={expanded}
         selected={selected}
         counts={counts}
@@ -709,6 +712,10 @@ export function App() {
         }}
         onOpenFolder={() => void openFolder()}
         onSelectFolder={onSelectFolder}
+        onShowAllFolders={(show) => {
+          setShowAllFolders(show);
+          if (!show && filter.type === "folder" && !counts.get(filter.path)) pickLibrary("all");
+        }}
       />
       <DocColumn
         key={session?.id ?? "empty"}

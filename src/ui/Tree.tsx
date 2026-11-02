@@ -9,11 +9,14 @@ export function collectPaths(nodes: readonly TreeNode[], into = new Set<string>(
   return into;
 }
 
-export function folderTree(nodes: readonly TreeNode[]): TreeNode[] {
+export function folderTree(nodes: readonly TreeNode[], showAll = false): TreeNode[] {
   const out: TreeNode[] = [];
   for (const node of nodes) {
     if (node.kind !== "folder") continue;
-    out.push({ ...node, children: folderTree(node.children ?? []) });
+    const children = folderTree(node.children ?? [], showAll);
+    if (showAll || children.length > 0 || node.children?.some((child) => child.kind === "file")) {
+      out.push({ ...node, children });
+    }
   }
   return out;
 }

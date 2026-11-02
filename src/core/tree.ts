@@ -39,8 +39,6 @@ async function breathe(progress: { n: number }): Promise<void> {
   }
 }
 
-type Walk = { nodes: TreeNode[]; vacant: boolean };
-
 export async function scanRoot(
   rootInput: string,
 ): Promise<{ tree: TreeNode[]; files: FileIdentity[]; complete: boolean; failedPaths: string[] }> {
@@ -51,10 +49,14 @@ export async function scanRoot(
   const seen = new Set<string>();
   const progress = { n: 0 };
 
-  const walk = async (logicalRel: string, dirReal: string, depth: number): Promise<Walk> => {
+  const walk = async (
+    logicalRel: string,
+    dirReal: string,
+    depth: number,
+  ): Promise<TreeNode[] | null> => {
     if (depth > MAX_DEPTH) failedPaths.push(logicalRel);
     if (depth > MAX_DEPTH || seen.has(dirReal) || !contained(root, dirReal)) {
-      return { nodes: [], vacant: false };
+      return null;
     }
     seen.add(dirReal);
     let entries: fs.Dirent[];
@@ -62,9 +64,8 @@ export async function scanRoot(
       entries = await fs.promises.readdir(dirReal, { withFileTypes: true });
     } catch {
       failedPaths.push(logicalRel);
-      return { nodes: [], vacant: false };
+      return null;
     }
-    if (entries.length === 0) return { nodes: [], vacant: true };
     const nodes: TreeNode[] = [];
     for (const entry of entries) {
       await breathe(progress);
@@ -90,8 +91,8 @@ export async function scanRoot(
         if (stat.isDirectory()) {
           if (seen.has(target)) continue;
           const child = await walk(childRel, target, depth + 1);
-          if (child.nodes.length > 0 || child.vacant) {
-            nodes.push({ name: entry.name, path: childRel, kind: "folder", children: child.nodes });
+          if (child) {
+            nodes.push({ name: entry.name, path: childRel, kind: "folder", children: child });
           }
         } else if (stat.isFile() && isMarkdownPath(entry.name)) {
           nodes.push({ name: entry.name, path: childRel, kind: "file" });
@@ -101,8 +102,8 @@ export async function scanRoot(
       }
       if (entry.isDirectory()) {
         const child = await walk(childRel, childPath, depth + 1);
-        if (child.nodes.length > 0 || child.vacant) {
-          nodes.push({ name: entry.name, path: childRel, kind: "folder", children: child.nodes });
+        if (child) {
+          nodes.push({ name: entry.name, path: childRel, kind: "folder", children: child });
         }
         continue;
       }
@@ -118,9 +119,9 @@ export async function scanRoot(
       }
     }
     nodes.sort(compareNodes);
-    return { nodes, vacant: false };
+    return nodes;
   };
 
   const walked = await walk("", root, 0);
-  return { tree: walked.nodes, files, complete: failedPaths.length === 0, failedPaths };
+  return { tree: walked ?? [], files, complete: failedPaths.length === 0, failedPaths };
 }

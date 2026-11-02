@@ -34,6 +34,121 @@ async function openWelcome(page: Page): Promise<void> {
   await page.locator('[data-testid="doc"][data-path="Welcome.md"]').click();
 }
 
+test("folders without Markdown are hidden by default and can be shown", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "simple-md-folder-filter-"));
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "simple-md-folder-filter-user-"));
+  fs.mkdirSync(path.join(root, "empty-parent", "empty-child"), { recursive: true });
+  fs.mkdirSync(path.join(root, "assets"));
+  fs.writeFileSync(path.join(root, "assets", "ignore.txt"), "Not Markdown");
+  fs.mkdirSync(path.join(root, "notes", "nested"), { recursive: true });
+  fs.writeFileSync(path.join(root, "notes", "nested", "note.markdown"), "# Note");
+  fs.writeFileSync(path.join(root, "Welcome.md"), "# Welcome");
+  const app = await launch(root, userData);
+  try {
+    const page = await app.firstWindow();
+    await openWelcome(page);
+    const toggle = page.getByRole("checkbox", { name: "Show all folders" });
+    const folder = (rel: string) =>
+      page.locator('[data-testid="tree-folder"]').filter({ hasText: rel });
+    await expect(toggle).not.toBeChecked();
+    await expect(folder("notes")).toBeVisible();
+    await expect(folder("nested")).toBeVisible();
+    await expect(folder("empty-parent")).toHaveCount(0);
+    await expect(folder("assets")).toHaveCount(0);
+
+    await toggle.check();
+    await expect(folder("empty-parent")).toBeVisible();
+    await expect(folder("empty-child")).toBeVisible();
+    await expect(folder("assets")).toBeVisible();
+    await folder("assets").click();
+    await expect(page.getByTestId("doc-count")).toHaveText("0 documents");
+    await toggle.uncheck();
+    await expect(folder("assets")).toHaveCount(0);
+    await expect(page.getByTestId("nav-all")).toHaveClass(/is-on/);
+
+    // Reconciliation reveals/hides folders as Markdown is added/removed.
+    const added = path.join(root, "assets", "added.md");
+    fs.writeFileSync(added, "# Added");
+    await expect(folder("assets")).toBeVisible();
+    fs.unlinkSync(added);
+    await expect(folder("assets")).toHaveCount(0);
+
+    await page.getByTestId("more").click();
+    await page.getByTestId("new-folder").click();
+    await page.getByTestId("dialog").locator("input").fill("new-empty");
+    await page.getByTestId("dialog").getByRole("button", { name: "Create", exact: true }).click();
+    await expect(toggle).toBeChecked();
+    await expect(folder("new-empty")).toBeVisible();
+  } finally {
+    await stopElectron(app);
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(userData, { recursive: true, force: true });
+  }
+});
+
+test("preview fills the pane and wraps long table entries in preview and split modes", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "simple-md-preview-layout-"));
+  const userData = fs.mkdtempSync(path.join(os.tmpdir(), "simple-md-preview-layout-user-"));
+  const longWord = "unbroken".repeat(40);
+  const codeLine = `const value = '${longWord}';`;
+  fs.writeFileSync(
+    path.join(root, "Welcome.md"),
+    `# Consolidated reference and pilot plan
+
+Long link: https://example.com/${longWord}
+
+| # | Source | Author | Written | Role here |
+| --- | --- | --- | --- | --- |
+| S1 | \`software-factory-option-a-implementation-guide.md\` | Guide author with review comments | 2026-10-27 10:08 | Design foundation and platform reference |
+| S2 | ${longWord} | Reviewer | 2026-10-27 | Review of this repository |
+
+\`\`\`js
+${codeLine}
+\`\`\`
+`,
+  );
+  const app = await launch(root, userData);
+  try {
+    const page = await app.firstWindow();
+    await openWelcome(page);
+    await page.getByTestId("mode-preview").click();
+    const preview = page.getByTestId("preview");
+    await expect(preview.locator("table")).toBeVisible();
+    for (const mode of ["preview", "split"]) {
+      if (mode === "split") {
+        await page.getByTestId("more").click();
+        await page.getByTestId("mode-split").click();
+      }
+      for (const width of [1600, 1280, 1000]) {
+        await page.setViewportSize({ width, height: 900 });
+        await expect
+          .poll(() => preview.evaluate((node) => node.scrollWidth - node.clientWidth))
+          .toBeLessThanOrEqual(1);
+        const bounds = await preview.evaluate((node) => {
+          const pane = node.parentElement!.getBoundingClientRect();
+          const preview = node.getBoundingClientRect();
+          return {
+            paneWidth: pane.width,
+            previewWidth: preview.width,
+            right: pane.right - preview.right,
+          };
+        });
+        expect(Math.abs(bounds.right)).toBeLessThanOrEqual(1);
+        if (mode === "preview") {
+          expect(Math.abs(bounds.paneWidth - bounds.previewWidth)).toBeLessThanOrEqual(1);
+        }
+        const code = preview.locator("pre");
+        await expect(code).toContainText(codeLine);
+        expect(await code.evaluate((node) => node.scrollWidth > node.clientWidth)).toBe(true);
+      }
+    }
+  } finally {
+    await stopElectron(app);
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(userData, { recursive: true, force: true });
+  }
+});
+
 test("switching folders shows the new tree and does not keep the previous tags", async () => {
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), "simple-md-folders-"));
   const userData = fs.mkdtempSync(path.join(os.tmpdir(), "simple-md-folders-user-"));

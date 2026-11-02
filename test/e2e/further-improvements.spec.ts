@@ -98,6 +98,7 @@ test("image-heavy split view revalidates once per path without retransferring un
 test("the toolbar names a selected folder before rename or trash", async () => {
   const { app, page, root, parent } = await setup("Open document");
   try {
+    await page.getByRole("checkbox", { name: "Show all folders" }).check();
     await page.locator('[data-testid="tree-folder"][data-path="sub"]').click();
     await page.getByTestId("more").click();
     await expect(page.getByTestId("rename")).toHaveText("Rename folder “sub”");

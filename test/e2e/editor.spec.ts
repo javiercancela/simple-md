@@ -93,7 +93,7 @@ See [Monday](journal/monday.md).
 
     await expect(page.locator('[data-testid="doc"][data-path="Welcome.md"]')).toBeVisible();
     await expect(page.locator('[data-testid="doc"][data-path="journal/monday.md"]')).toBeVisible();
-    await expect(page.locator('[data-testid="tree-folder"][data-path="inbox"]')).toBeVisible();
+    await expect(page.locator('[data-testid="tree-folder"][data-path="inbox"]')).toHaveCount(0);
     await expect(page.getByText("ignore.txt")).toHaveCount(0);
 
     await page.getByTestId("search").fill("monday");

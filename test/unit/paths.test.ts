@@ -75,7 +75,7 @@ describe("resolveContained", () => {
 });
 
 describe("scanRoot", () => {
-  it("lists markdown files, empty folders, and skips other files and escaping symlinks", async () => {
+  it("lists all folders and markdown files, skipping other files and escaping symlinks", async () => {
     const parent = tempDir();
     const root = path.join(parent, "notes");
     const outside = path.join(parent, "outside");
@@ -98,6 +98,10 @@ describe("scanRoot", () => {
     const paths = files.map((file) => file.path).sort();
     expect(paths).toEqual(["Welcome.md", "journal/monday.md"]);
     expect(JSON.stringify(tree)).toContain("inbox");
+    expect(tree.find((node) => node.path === "assets")).toMatchObject({
+      kind: "folder",
+      children: [],
+    });
     expect(JSON.stringify(tree)).not.toContain("secret");
     expect(JSON.stringify(tree)).not.toContain("ignore.txt");
     expect(JSON.stringify(tree)).not.toContain("node_modules");
