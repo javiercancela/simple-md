@@ -58,16 +58,16 @@ function localImages() {
   };
 }
 
+const processor = unified()
+  .use(remarkParse)
+  .use(remarkGfm)
+  .use(remarkRehype)
+  .use(rehypeSlug)
+  .use(rehypeHighlight)
+  .use(localImages)
+  .use(rehypeSanitize, schema())
+  .use(rehypeStringify);
+
 export function renderMarkdown(markdown: string): string {
-  const file = unified()
-    .use(remarkParse)
-    .use(remarkGfm)
-    .use(remarkRehype)
-    .use(rehypeSlug)
-    .use(rehypeHighlight)
-    .use(localImages)
-    .use(rehypeSanitize, schema())
-    .use(rehypeStringify)
-    .processSync(markdown);
-  return String(file);
+  return String(processor.processSync(markdown));
 }

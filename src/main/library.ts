@@ -66,6 +66,7 @@ export class Library {
   private readonly tags: TagIndex;
   private tree: TreeNode[] = [];
   private files: FileIdentity[] = [];
+  private scanIncomplete = false;
   private signature = "";
   private fileSignature = "";
   private timer: NodeJS.Timeout | null = null;
@@ -244,7 +245,9 @@ export class Library {
     this.files = scan.files;
     this.signature = next;
     this.fileSignature = fileSig;
-    if (changed) this.tags.reconcile(scan.files);
+    // A partial snapshot cannot establish deletion or an unambiguous rename.
+    if (scan.complete && (changed || this.scanIncomplete)) this.tags.reconcile(scan.files);
+    this.scanIncomplete = !scan.complete;
     if (changed || force) this.publish();
     return this.tree;
   }
@@ -275,7 +278,16 @@ export class Library {
     let content: string | null = null;
     try {
       content = readMarkdown(this.root, this.watched).content;
-    } catch {
+    } catch (error) {
+      // Only confirmed absence is removal; unreadable/oversized files are retried.
+      const cause = error instanceof Error && error.cause ? error.cause : error;
+      if (
+        !cause ||
+        typeof cause !== "object" ||
+        !("code" in cause) ||
+        (cause.code !== "ENOENT" && cause.code !== "ENOTDIR")
+      )
+        return;
       content = null;
     }
     if (content === null) {

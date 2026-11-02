@@ -44,13 +44,15 @@ type Walk = { nodes: TreeNode[]; vacant: boolean };
 
 export async function scanRoot(
   rootInput: string,
-): Promise<{ tree: TreeNode[]; files: FileIdentity[] }> {
+): Promise<{ tree: TreeNode[]; files: FileIdentity[]; complete: boolean; failedPaths: string[] }> {
   const root = realRoot(rootInput);
   const files: FileIdentity[] = [];
+  const failedPaths: string[] = [];
   const seen = new Set<string>();
   const progress = { n: 0 };
 
   const walk = async (logicalRel: string, dirReal: string, depth: number): Promise<Walk> => {
+    if (depth > MAX_DEPTH) failedPaths.push(logicalRel);
     if (depth > MAX_DEPTH || seen.has(dirReal) || !contained(root, dirReal)) {
       return { nodes: [], vacant: false };
     }
@@ -59,6 +61,7 @@ export async function scanRoot(
     try {
       entries = fs.readdirSync(dirReal, { withFileTypes: true });
     } catch {
+      failedPaths.push(logicalRel);
       return { nodes: [], vacant: false };
     }
     if (entries.length === 0) return { nodes: [], vacant: true };
@@ -73,6 +76,7 @@ export async function scanRoot(
         try {
           target = fs.realpathSync(childPath);
         } catch {
+          failedPaths.push(childRel);
           continue;
         }
         if (!contained(root, target)) continue;
@@ -80,6 +84,7 @@ export async function scanRoot(
         try {
           stat = fs.statSync(target, { bigint: true });
         } catch {
+          failedPaths.push(childRel);
           continue;
         }
         if (stat.isDirectory()) {
@@ -107,6 +112,7 @@ export async function scanRoot(
           nodes.push({ name: entry.name, path: childRel, kind: "file" });
           files.push(identityOf(childRel, stat));
         } catch {
+          failedPaths.push(childRel);
           continue;
         }
       }
@@ -116,5 +122,5 @@ export async function scanRoot(
   };
 
   const walked = await walk("", root, 0);
-  return { tree: walked.nodes, files };
+  return { tree: walked.nodes, files, complete: failedPaths.length === 0, failedPaths };
 }

@@ -1,5 +1,5 @@
 import react from "@vitejs/plugin-react";
-import { defineConfig, type Plugin } from "vite";
+import { defaultClientConditions, defineConfig, type Plugin } from "vite";
 import { contentSecurityPolicy } from "./src/shared/csp";
 
 function productionCsp(): Plugin {
@@ -15,6 +15,8 @@ function productionCsp(): Plugin {
 
 export default defineConfig({
   plugins: [react(), productionCsp()],
+  // Markdown dependencies must select their DOM-free worker exports in dev and builds.
+  resolve: { conditions: ["worker", ...defaultClientConditions] },
   server: {
     host: "127.0.0.1",
   },

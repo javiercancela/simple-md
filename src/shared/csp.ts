@@ -9,6 +9,7 @@ export function contentSecurityPolicy(devServer: string): string {
     "style-src 'self' 'unsafe-inline'",
     "img-src data: blob:",
     "font-src 'self'",
+    "worker-src 'self'",
     connect,
     "object-src 'none'",
     "base-uri 'none'",

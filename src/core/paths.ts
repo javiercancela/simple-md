@@ -67,7 +67,7 @@ export function portableRelative(input: string): string {
 export function resolveContained(
   root: string,
   relInput: string,
-  options: { allowMissing?: boolean } = {},
+  options: { allowMissing?: boolean; preserveFinalSymlink?: boolean } = {},
 ): string {
   const rootReal = realRoot(root);
   const rel = normalizeRelative(relInput);
@@ -86,12 +86,13 @@ export function resolveContained(
         assertInside(rootReal, next);
         return next;
       }
-      throw new Error("Path not found");
+      if (!isEnoent(error)) throw error;
+      throw new Error("Path not found", { cause: error });
     }
     if (listed.isSymbolicLink()) {
       const target = fs.realpathSync(next);
       assertInside(rootReal, target);
-      current = target;
+      current = last && options.preserveFinalSymlink ? next : target;
       continue;
     }
     assertInside(rootReal, next);

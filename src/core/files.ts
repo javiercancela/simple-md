@@ -103,7 +103,7 @@ export function describePath(
   relInput: string,
 ): { rel: string; abs: string; isDirectory: boolean } {
   const rel = portableRelative(relInput);
-  const abs = resolveContained(root, rel);
+  const abs = resolveContained(root, rel, { preserveFinalSymlink: true });
   return { rel, abs, isDirectory: fs.statSync(abs).isDirectory() };
 }
 
@@ -113,20 +113,21 @@ export function renameInside(
   toInput: string,
 ): { from: string; to: string; isDirectory: boolean } {
   const from = portableRelative(fromInput);
-  const fromAbs = resolveContained(root, from);
+  const fromAbs = resolveContained(root, from, { preserveFinalSymlink: true });
   const isDirectory = fs.statSync(fromAbs).isDirectory();
   const to = isDirectory ? portableRelative(toInput) : markdownTarget(portableRelative(toInput));
   if (!isDirectory && !isMarkdownPath(from)) throw new Error("Only Markdown files can be renamed");
   if (from === to) return { from, to, isDirectory };
   let toAbs: string;
   try {
-    toAbs = resolveContained(root, to, { allowMissing: true });
+    toAbs = resolveContained(root, to, { allowMissing: true, preserveFinalSymlink: true });
   } catch (error) {
     if (error instanceof Error && error.message === "Path not found")
       throw new Error("Folder not found");
     throw error;
   }
-  if (fs.existsSync(toAbs)) throw new Error("Already exists");
+  if (fs.existsSync(toAbs) || fs.lstatSync(toAbs, { throwIfNoEntry: false }))
+    throw new Error("Already exists");
   fs.renameSync(fromAbs, toAbs);
   return { from, to, isDirectory };
 }

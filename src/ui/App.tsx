@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { decideExternalChange } from "../core/external";
 import { classifyHref } from "../core/links";
-import { renderMarkdown } from "../core/markdown";
+import { useMarkdownPreview } from "./useMarkdownPreview";
 import type { TagColorId } from "../core/colors";
 import type {
   CatalogFile,
@@ -157,12 +157,13 @@ export function App() {
   const [fileTags, setFileTags] = useState<string[]>([]);
   const [revision, setRevision] = useState(0);
   const [pendingHash, setPendingHash] = useState("");
-  const [previewSource, setPreviewSource] = useState("");
   const [diskNotice, setDiskNotice] = useState<DiskNotice | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [draft, setDraft] = useState("");
 
+  const documentIdRef = useRef(0);
+  const saveQueueRef = useRef(Promise.resolve());
   const rootRef = useRef<string | null>(null);
   const filePathRef = useRef<string | null>(null);
   const bufferRef = useRef("");
@@ -186,10 +187,7 @@ export function App() {
   const osDark = usePrefersDark();
   const dark = focus || osDark;
   const dirty = filePath !== null && buffer !== saved;
-  const html = useMemo(
-    () => (filePath ? renderMarkdown(previewSource) : ""),
-    [filePath, previewSource],
-  );
+  const html = useMarkdownPreview(buffer, !!filePath && !focus && mode !== "editor", revision);
   const catalog = session?.catalog ?? [];
   const docs = useMemo(
     () => visibleDocs(catalog, filter, query, sort),
@@ -207,6 +205,7 @@ export function App() {
   }, [dark]);
 
   function commitFile(rel: string | null, content: string, nextTags: string[], hash = ""): void {
+    documentIdRef.current += 1;
     filePathRef.current = rel;
     bufferRef.current = content;
     savedRef.current = content;
@@ -215,7 +214,6 @@ export function App() {
     setBuffer(content);
     setSaved(content);
     setFileTags(nextTags);
-    setPreviewSource(content);
     setRevision((value) => value + 1);
     setPendingHash(hash);
     setDiskNotice(null);
@@ -259,16 +257,25 @@ export function App() {
   async function save(): Promise<boolean> {
     const rel = filePathRef.current;
     if (!rel) return true;
-    try {
-      await window.md.writeFile(rel, bufferRef.current);
-      savedRef.current = bufferRef.current;
-      setSaved(bufferRef.current);
-      setError(null);
-      return true;
-    } catch (reason) {
-      setError(errorText(reason));
-      return false;
-    }
+    const documentId = documentIdRef.current;
+    const content = bufferRef.current;
+    // Keep writes ordered, and never send a queued write into a different session.
+    const operation = saveQueueRef.current.then(async () => {
+      if (documentIdRef.current !== documentId || filePathRef.current !== rel) return false;
+      try {
+        await window.md.writeFile(rel, content);
+        if (documentIdRef.current !== documentId || filePathRef.current !== rel) return false;
+        savedRef.current = content;
+        setSaved(content);
+        setError(null);
+        return bufferRef.current === content;
+      } catch (reason) {
+        if (documentIdRef.current === documentId) setError(errorText(reason));
+        return false;
+      }
+    });
+    saveQueueRef.current = operation.then(() => {});
+    return operation;
   }
 
   function openDialog(next: DialogState, initial = ""): Promise<unknown> {
@@ -293,8 +300,6 @@ export function App() {
     const choice = await openDialog({ kind: "discard" });
     if (choice !== "save" && choice !== "discard") return false;
     if (choice === "save") return save();
-    savedRef.current = bufferRef.current;
-    setSaved(bufferRef.current);
     return true;
   }
 
@@ -551,11 +556,6 @@ export function App() {
     },
     library: applySession,
   };
-
-  useEffect(() => {
-    const id = window.setTimeout(() => setPreviewSource(buffer), 40);
-    return () => window.clearTimeout(id);
-  }, [buffer]);
 
   useEffect(() => {
     const name = filePath ? (filePath.split("/").pop() ?? "Simple MD") : "Simple MD";

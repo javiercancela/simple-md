@@ -5,6 +5,7 @@ import {
   type IpcMainEvent,
   type IpcMainInvokeEvent,
 } from "electron";
+import { isAppFile, isDevRequest, isRendererDocument } from "../core/requests";
 import { contentSecurityPolicy } from "../shared/csp";
 
 function devServerUrl(): string {
@@ -15,17 +16,8 @@ function allowedRequest(url: string): boolean {
   if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("devtools:"))
     return true;
   const dev = devServerUrl();
-  if (dev && url.startsWith(dev)) return true;
-  if (dev && (url.startsWith("ws://127.0.0.1:") || url.startsWith("ws://localhost:"))) return true;
-  if (!url.startsWith("file:")) return false;
-  let decoded = url;
-  try {
-    decoded = decodeURIComponent(url);
-  } catch {
-    return false;
-  }
-  const appPath = app.getAppPath();
-  return decoded.includes(appPath) || decoded.includes(`${appPath}.unpacked`);
+  if (isDevRequest(url, dev)) return true;
+  return isAppFile(url, app.getAppPath());
 }
 
 export function installSessionGuards(): void {
@@ -48,12 +40,7 @@ export function installSessionGuards(): void {
 
 function isAppNavigation(url: string): boolean {
   const dev = devServerUrl();
-  if (dev && url.startsWith(dev)) return true;
-  if (!url.startsWith("file:")) return false;
-  return (
-    url.includes("/renderer/main_window/index.html") ||
-    url.includes("\\renderer\\main_window\\index.html")
-  );
+  return isDevRequest(url, dev) || isRendererDocument(url, app.getAppPath());
 }
 
 export function hardenContents(win: BrowserWindow): void {
@@ -80,8 +67,8 @@ export function assertSender(
   const url = event.senderFrame.url;
   const dev = devServerUrl();
   if (dev) {
-    if (!url.startsWith(dev)) throw new Error("Untrusted sender");
+    if (!isDevRequest(url, dev)) throw new Error("Untrusted sender");
     return;
   }
-  if (!url.startsWith("file:")) throw new Error("Untrusted sender");
+  if (!isRendererDocument(url, app.getAppPath())) throw new Error("Untrusted sender");
 }
