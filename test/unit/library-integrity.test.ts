@@ -52,12 +52,14 @@ describe("incomplete filesystem reads", () => {
       library.setFavorite("sub/a.md", true);
       const before = fs.readFileSync(indexFile, "utf8");
       const method = operation === "directory" ? "readdir" : "stat";
+      // Match scanRoot's native resolution, including Windows short-path expansion.
+      const failedPath = path.join(
+        await fs.promises.realpath(root),
+        operation === "directory" ? "sub" : "sub/a.md",
+      );
       const original = fs.promises[method];
       const spy = vi.spyOn(fs.promises, method).mockImplementation((async (...args: unknown[]) => {
-        if (
-          String(args[0]) ===
-          path.join(fs.realpathSync(root), operation === "directory" ? "sub" : "sub/a.md")
-        ) {
+        if (String(args[0]) === failedPath) {
           throw Object.assign(new Error("temporary I/O failure"), { code: "EIO" });
         }
         return (original as (...args: unknown[]) => unknown)(...args);
