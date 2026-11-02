@@ -1,4 +1,4 @@
-import { stopElectron } from "./helpers";
+import { removeTestDirectory, stopElectron } from "./helpers";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -26,7 +26,7 @@ async function setup(content = "# Alpha\n") {
 
 async function cleanup(app: ElectronApplication, parent: string) {
   await stopElectron(app);
-  fs.rmSync(parent, { recursive: true, force: true });
+  removeTestDirectory(parent);
 }
 
 async function menu(app: ElectronApplication, id: string) {

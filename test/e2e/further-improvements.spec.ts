@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { _electron as electron } from "playwright";
 import { expect, test } from "@playwright/test";
-import { stopElectron } from "./helpers";
+import { removeTestDirectory, stopElectron } from "./helpers";
 
 const electronBinary = createRequire(import.meta.url)("electron") as string;
 const png = Buffer.from(
@@ -91,7 +91,7 @@ test("image-heavy split view revalidates once per path without retransferring un
     );
   } finally {
     await stopElectron(app);
-    fs.rmSync(parent, { recursive: true, force: true });
+    removeTestDirectory(parent);
   }
 });
 
@@ -121,7 +121,7 @@ test("the toolbar names a selected folder before rename or trash", async () => {
     await expect(page.getByTestId("dirty")).toHaveCount(0);
   } finally {
     await stopElectron(app);
-    fs.rmSync(parent, { recursive: true, force: true });
+    removeTestDirectory(parent);
   }
 });
 
@@ -148,6 +148,6 @@ test("text snapshots preserve untouched CRLF files and undo returns to a clean b
     expect(fs.readFileSync(path.join(root, "a.md"), "utf8")).toBe(original);
   } finally {
     await stopElectron(app);
-    fs.rmSync(parent, { recursive: true, force: true });
+    removeTestDirectory(parent);
   }
 });

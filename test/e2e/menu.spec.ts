@@ -1,4 +1,4 @@
-import { stopElectron } from "./helpers";
+import { removeTestDirectory, stopElectron } from "./helpers";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -106,8 +106,8 @@ test("menu commands create and save, and standard roles are present", async () =
     expect(fs.readFileSync(welcome, "utf8")).toContain("Saved from the menu.");
   } finally {
     await stopElectron(app);
-    fs.rmSync(path.dirname(root), { recursive: true, force: true });
-    fs.rmSync(userData, { recursive: true, force: true });
+    removeTestDirectory(path.dirname(root));
+    removeTestDirectory(userData);
   }
 });
 
@@ -135,8 +135,8 @@ test("quit exits, and a dirty buffer asks before the process exits", async () =>
     } catch {
       // Quit already ended the Electron process.
     }
-    fs.rmSync(path.dirname(root), { recursive: true, force: true });
-    fs.rmSync(userData, { recursive: true, force: true });
+    removeTestDirectory(path.dirname(root));
+    removeTestDirectory(userData);
   }
 });
 
@@ -151,7 +151,7 @@ test("quit with a clean window exits the process", async () => {
     await expect.poll(() => child.exitCode, { timeout: 10000 }).toBe(0);
   } finally {
     await stopElectron(app);
-    fs.rmSync(path.dirname(root), { recursive: true, force: true });
-    fs.rmSync(userData, { recursive: true, force: true });
+    removeTestDirectory(path.dirname(root));
+    removeTestDirectory(userData);
   }
 });

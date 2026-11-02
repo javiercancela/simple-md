@@ -1,5 +1,11 @@
 import type { ChildProcess } from "node:child_process";
+import fs from "node:fs";
 import type { ElectronApplication } from "playwright";
+
+export function removeTestDirectory(directory: string): void {
+  // Chromium subprocesses can finish cache writes just after the main process exits.
+  fs.rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+}
 
 // Teardown must finish even if a failed test leaves the discard prompt open.
 export async function stopElectron(app: ElectronApplication | undefined): Promise<void> {

@@ -1,4 +1,4 @@
-import { stopElectron } from "./helpers";
+import { removeTestDirectory, stopElectron } from "./helpers";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -76,8 +76,8 @@ test("tag picker assigns and removes a tag from the keyboard", async () => {
     await expect(page.getByTestId("tag-chip")).toHaveCount(0);
   } finally {
     await stopElectron(app);
-    fs.rmSync(path.dirname(root), { recursive: true, force: true });
-    fs.rmSync(userData, { recursive: true, force: true });
+    removeTestDirectory(path.dirname(root));
+    removeTestDirectory(userData);
   }
 });
 
@@ -117,7 +117,7 @@ test("search by #tag, favorites, and focus mode", async () => {
     await page.screenshot({ path: "docs/screenshots/library-dark.png" });
   } finally {
     await stopElectron(app);
-    fs.rmSync(path.dirname(root), { recursive: true, force: true });
-    fs.rmSync(userData, { recursive: true, force: true });
+    removeTestDirectory(path.dirname(root));
+    removeTestDirectory(userData);
   }
 });

@@ -1,4 +1,4 @@
-import { stopElectron } from "./helpers";
+import { removeTestDirectory, stopElectron } from "./helpers";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -159,7 +159,7 @@ See [Monday](journal/monday.md).
     await expect(page.getByTestId("preview")).toContainText("External note.");
   } finally {
     await stopElectron(app);
-    fs.rmSync(parent, { recursive: true, force: true });
-    fs.rmSync(userData, { recursive: true, force: true });
+    removeTestDirectory(parent);
+    removeTestDirectory(userData);
   }
 });

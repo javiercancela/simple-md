@@ -1,4 +1,4 @@
-import { stopElectron } from "./helpers";
+import { removeTestDirectory, stopElectron } from "./helpers";
 import { createRequire } from "node:module";
 import fs from "node:fs";
 import os from "node:os";
@@ -81,8 +81,8 @@ test("folders without Markdown are hidden by default and can be shown", async ()
     await expect(folder("new-empty")).toBeVisible();
   } finally {
     await stopElectron(app);
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(userData, { recursive: true, force: true });
+    removeTestDirectory(root);
+    removeTestDirectory(userData);
   }
 });
 
@@ -144,8 +144,8 @@ ${codeLine}
     }
   } finally {
     await stopElectron(app);
-    fs.rmSync(root, { recursive: true, force: true });
-    fs.rmSync(userData, { recursive: true, force: true });
+    removeTestDirectory(root);
+    removeTestDirectory(userData);
   }
 });
 
@@ -178,8 +178,8 @@ test("switching folders shows the new tree and does not keep the previous tags",
     await expect(page.getByTestId("tag")).toHaveCount(0);
   } finally {
     await stopElectron(app);
-    fs.rmSync(parent, { recursive: true, force: true });
-    fs.rmSync(userData, { recursive: true, force: true });
+    removeTestDirectory(parent);
+    removeTestDirectory(userData);
   }
 });
 
@@ -217,7 +217,7 @@ test("opening another folder asks before discarding a dirty file and stays respo
     await expect(page.locator('[data-testid="doc"][data-path="Welcome.md"]')).toHaveCount(0);
   } finally {
     await stopElectron(app);
-    fs.rmSync(parent, { recursive: true, force: true });
-    fs.rmSync(userData, { recursive: true, force: true });
+    removeTestDirectory(parent);
+    removeTestDirectory(userData);
   }
 });

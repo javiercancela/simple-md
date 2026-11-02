@@ -1,3 +1,4 @@
+import { removeTestDirectory } from "./helpers";
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -92,6 +93,6 @@ test("packaged resources start, preload connects, and preview worker/images load
       child.kill("SIGKILL");
       await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, 5000))]);
     }
-    fs.rmSync(temporary, { recursive: true, force: true });
+    removeTestDirectory(temporary);
   }
 });
